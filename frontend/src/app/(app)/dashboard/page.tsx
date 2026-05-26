@@ -108,20 +108,22 @@ export default function DashboardPage() {
             <div key={project.projectId} className="relative group">
               <Link href={`/projects/${project.projectId}`} className="block">
                 <Card className="p-5 hover:shadow-md hover:border-primary/30 transition-all cursor-pointer">
-                  <div className="flex items-start justify-between mb-4">
+                  <div className="mb-4">
                     <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center group-hover:bg-primary/15 transition-colors">
                       <Bug className="w-5 h-5 text-primary" />
                     </div>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(project.createdAt).toLocaleDateString()}
-                    </span>
                   </div>
                   <h3 className="font-semibold text-foreground text-base mb-1 group-hover:text-primary transition-colors">
                     {project.title}
                   </h3>
-                  <p className="text-sm text-muted-foreground">
-                    {project.testerCount ?? 0} tester{(project.testerCount ?? 0) !== 1 ? "s" : ""}
-                  </p>
+                  <div className="flex items-center justify-between mt-1">
+                    <p className="text-sm text-muted-foreground">
+                      {project.testerCount ?? 0} tester{(project.testerCount ?? 0) !== 1 ? "s" : ""}
+                    </p>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(project.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
                 </Card>
               </Link>
               {role === "admin" && (
