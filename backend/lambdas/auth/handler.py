@@ -78,18 +78,29 @@ def invite_tester(event: dict, admin_sub: str, admin_role: str) -> dict:
 
     tester_id = str(tester_sub)
 
+    # Check if already a member of this project
+    existing_membership = table.get_item(
+        Key={"PK": f"PROJECT#{project_id}", "SK": f"MEMBER#{tester_id}"}
+    ).get("Item")
+    if existing_membership:
+        return response(400, {"error": "This tester is already a member of this project."})
+
     # Write user record if not exists
-    table.put_item(
-        Item={
-            "PK": f"USER#{tester_id}",
-            "SK": "PROFILE",
-            "email": email,
-            "role": "tester",
-            "name": email.split("@")[0],
-            "phone": "",
-        },
-        ConditionExpression="attribute_not_exists(PK)",
-    )
+    try:
+        table.put_item(
+            Item={
+                "PK": f"USER#{tester_id}",
+                "SK": "PROFILE",
+                "email": email,
+                "role": "tester",
+                "name": email.split("@")[0],
+                "phone": "",
+            },
+            ConditionExpression="attribute_not_exists(PK)",
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            raise
 
     # Write project membership
     table.put_item(

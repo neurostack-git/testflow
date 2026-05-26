@@ -71,10 +71,6 @@ def list_bugs(project_id: str, user_sub: str, user_role: str) -> dict:
     )
     bugs = result.get("Items", [])
 
-    # Testers see only their own bugs
-    if user_role == "tester":
-        bugs = [b for b in bugs if b.get("reportedBy") == user_sub]
-
     # Enrich with reporter display names
     reporter_subs = {b.get("reportedBy") for b in bugs if b.get("reportedBy")}
     name_map = {}
