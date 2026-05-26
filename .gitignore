@@ -1,0 +1,23 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+.env
+.env.local
+.env*.local
+
+# Python / CDK
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+cdk.out/
+.cdk.staging/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
