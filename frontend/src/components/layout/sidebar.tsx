@@ -3,18 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
-import { LayoutDashboard, Settings2, User, LogOut } from "lucide-react";
+import { LayoutDashboard, Settings2, User, LogOut, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
 
 const adminNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin", label: "Admin", icon: Settings2 },
+  { href: "/bin", label: "Bin", icon: Trash2 },
   { href: "/profile", label: "Profile", icon: User },
 ];
 
 const testerNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/bin", label: "Bin", icon: Trash2 },
   { href: "/profile", label: "Profile", icon: User },
 ];
 

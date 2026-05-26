@@ -200,6 +200,7 @@ class TestflowStack(Stack):
         bucket.grant_read(attachments_fn)
 
         bucket.grant_delete(projects_fn)
+        bucket.grant_delete(bugs_fn)
 
         # Allow auth Lambda to create/admin Cognito users
         auth_fn.add_to_role_policy(
@@ -287,7 +288,10 @@ class TestflowStack(Stack):
 
         # Projects
         add_routes("/projects", projects_fn, [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST])
-        add_routes("/projects/{projectId}", projects_fn, [apigwv2.HttpMethod.GET])
+        add_routes("/projects/bin", projects_fn, [apigwv2.HttpMethod.GET])
+        add_routes("/projects/{projectId}", projects_fn, [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.DELETE])
+        add_routes("/projects/{projectId}/restore", projects_fn, [apigwv2.HttpMethod.POST])
+        add_routes("/projects/{projectId}/permanent", projects_fn, [apigwv2.HttpMethod.DELETE])
         add_routes("/projects/{projectId}/members", projects_fn, [apigwv2.HttpMethod.GET])
         add_routes("/projects/{projectId}/members/{memberId}", projects_fn, [apigwv2.HttpMethod.DELETE])
 

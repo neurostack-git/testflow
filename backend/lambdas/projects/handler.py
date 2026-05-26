@@ -33,8 +33,16 @@ def lambda_handler(event: dict, context) -> dict:
         return list_projects(user_sub, user_role)
     if route == "POST /projects":
         return create_project(event, user_sub, user_role)
+    if route == "GET /projects/bin":
+        return list_bin(user_sub, user_role)
     if route == "GET /projects/{projectId}":
         return get_project(path_params.get("projectId"), user_sub, user_role)
+    if route == "DELETE /projects/{projectId}":
+        return soft_delete_project(path_params.get("projectId"), user_sub, user_role)
+    if route == "POST /projects/{projectId}/restore":
+        return restore_project(path_params.get("projectId"), user_sub, user_role)
+    if route == "DELETE /projects/{projectId}/permanent":
+        return permanent_delete_project(path_params.get("projectId"), user_sub, user_role)
     if route == "GET /projects/{projectId}/members":
         return list_members(path_params.get("projectId"), user_sub, user_role)
     if route == "DELETE /projects/{projectId}/members/{memberId}":
@@ -55,7 +63,10 @@ def list_projects(user_sub: str, user_role: str) -> dict:
             IndexName="GSI1",
             KeyConditionExpression=Key("GSI1PK").eq(f"ADMIN#{user_sub}"),
         )
-        projects = [item for item in admin_result.get("Items", []) if item.get("SK") == "METADATA"]
+        projects = [
+            item for item in admin_result.get("Items", [])
+            if item.get("SK") == "METADATA" and not item.get("deletedAt")
+        ]
     else:
         result = table.query(
             IndexName="GSI1",
@@ -65,10 +76,9 @@ def list_projects(user_sub: str, user_role: str) -> dict:
         projects = []
         for pid in project_ids:
             item = table.get_item(Key={"PK": f"PROJECT#{pid}", "SK": "METADATA"}).get("Item")
-            if item:
+            if item and not item.get("deletedAt"):
                 projects.append(item)
 
-    # Attach tester count to each project
     for proj in projects:
         pid = proj.get("projectId", "")
         count_result = table.query(
@@ -105,7 +115,6 @@ def create_project(event: dict, user_sub: str, user_role: str) -> dict:
         }
     )
 
-    # Auto-add all testers from the admin's existing projects
     tester_count = _auto_add_existing_testers(project_id, user_sub, now)
 
     return response(201, {"projectId": project_id, "title": title, "createdAt": now, "testerCount": tester_count})
@@ -148,6 +157,124 @@ def _auto_add_existing_testers(new_project_id: str, admin_sub: str, now: str) ->
             except Exception:
                 pass
     return count
+
+
+def soft_delete_project(project_id: str, user_sub: str, user_role: str) -> dict:
+    if user_role != "admin":
+        return response(403, {"error": "Forbidden"})
+
+    proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
+    if not proj:
+        return response(404, {"error": "Project not found"})
+
+    if proj.get("GSI1PK") != f"ADMIN#{user_sub}":
+        return response(403, {"error": "Forbidden"})
+
+    now = datetime.now(timezone.utc).isoformat()
+    table.update_item(
+        Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"},
+        UpdateExpression="SET deletedAt = :d",
+        ExpressionAttributeValues={":d": now},
+    )
+    return response(200, {"message": "Project moved to bin"})
+
+
+def list_bin(user_sub: str, user_role: str) -> dict:
+    if user_role == "admin":
+        result = table.query(
+            IndexName="GSI1",
+            KeyConditionExpression=Key("GSI1PK").eq(f"ADMIN#{user_sub}"),
+        )
+        projects = [
+            item for item in result.get("Items", [])
+            if item.get("SK") == "METADATA" and item.get("deletedAt")
+        ]
+    else:
+        result = table.query(
+            IndexName="GSI1",
+            KeyConditionExpression=Key("GSI1PK").eq(f"USER#{user_sub}") & Key("GSI1SK").begins_with("PROJECT#"),
+        )
+        project_ids = [item["GSI1SK"].replace("PROJECT#", "") for item in result.get("Items", [])]
+        projects = []
+        for pid in project_ids:
+            item = table.get_item(Key={"PK": f"PROJECT#{pid}", "SK": "METADATA"}).get("Item")
+            if item and item.get("deletedAt"):
+                projects.append(item)
+
+    return response(200, {"projects": projects})
+
+
+def restore_project(project_id: str, user_sub: str, user_role: str) -> dict:
+    proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
+    if not proj:
+        return response(404, {"error": "Project not found"})
+
+    if user_role == "admin":
+        if proj.get("GSI1PK") != f"ADMIN#{user_sub}":
+            return response(403, {"error": "Forbidden"})
+    else:
+        membership = table.get_item(
+            Key={"PK": f"PROJECT#{project_id}", "SK": f"MEMBER#{user_sub}"}
+        ).get("Item")
+        if not membership:
+            return response(403, {"error": "Forbidden"})
+
+    table.update_item(
+        Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"},
+        UpdateExpression="REMOVE deletedAt",
+    )
+    return response(200, {"message": "Project restored"})
+
+
+def permanent_delete_project(project_id: str, user_sub: str, user_role: str) -> dict:
+    if user_role != "admin":
+        return response(403, {"error": "Forbidden"})
+
+    proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
+    if not proj:
+        return response(404, {"error": "Project not found"})
+
+    if proj.get("GSI1PK") != f"ADMIN#{user_sub}":
+        return response(403, {"error": "Forbidden"})
+
+    # Collect all items for this project
+    all_items = []
+    last_key = None
+    while True:
+        kwargs = {"KeyConditionExpression": Key("PK").eq(f"PROJECT#{project_id}")}
+        if last_key:
+            kwargs["ExclusiveStartKey"] = last_key
+        result = table.query(**kwargs)
+        all_items.extend(result.get("Items", []))
+        last_key = result.get("LastEvaluatedKey")
+        if not last_key:
+            break
+
+    # Delete S3 objects for bugs and reports
+    if BUCKET_NAME:
+        for item in all_items:
+            sk = item.get("SK", "")
+            if sk.startswith("BUG#"):
+                for key in item.get("screenshots", []) + item.get("documents", []):
+                    if key:
+                        try:
+                            s3.delete_object(Bucket=BUCKET_NAME, Key=key)
+                        except Exception:
+                            pass
+            elif sk.startswith("REPORT#"):
+                s3_key = item.get("s3Key")
+                if s3_key:
+                    try:
+                        s3.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+                    except Exception:
+                        pass
+
+    # Batch delete all DynamoDB items
+    with table.batch_writer() as batch:
+        for item in all_items:
+            batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+
+    return response(200, {"message": "Project permanently deleted"})
 
 
 def get_project(project_id: str, user_sub: str, user_role: str) -> dict:
@@ -234,7 +361,6 @@ def save_report(event: dict, project_id: str, user_sub: str, user_role: str) -> 
     if not _check_project_access(project_id, user_sub, user_role):
         return response(403, {"error": "Forbidden"})
 
-    # Check max 5
     existing = table.query(
         KeyConditionExpression=Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("REPORT#"),
         Select="COUNT",
@@ -284,7 +410,6 @@ def delete_report(project_id: str, report_id: str, user_sub: str, user_role: str
     if not report:
         return response(404, {"error": "Report not found"})
 
-    # Delete from S3
     if BUCKET_NAME and report.get("s3Key"):
         try:
             s3.delete_object(Bucket=BUCKET_NAME, Key=report["s3Key"])

@@ -1,8 +1,9 @@
 import json
 import os
-import uuid
 import boto3
+from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
+from datetime import datetime, timezone
 
 dynamodb = boto3.resource("dynamodb")
 cognito = boto3.client("cognito-idp")
@@ -45,12 +46,10 @@ def invite_tester(event: dict, admin_sub: str, admin_role: str) -> dict:
     if not email or not project_id:
         return response(400, {"error": "email and projectId are required"})
 
-    # Check project exists
     proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
     if not proj:
         return response(404, {"error": "Project not found"})
 
-    # Create Cognito user (sends temp password email automatically)
     try:
         cognito_resp = cognito.admin_create_user(
             UserPoolId=USER_POOL_ID,
@@ -62,12 +61,10 @@ def invite_tester(event: dict, admin_sub: str, admin_role: str) -> dict:
             ],
             DesiredDeliveryMediums=["EMAIL"],
         )
-        # Extract UUID sub from attributes (Username field is the email, not the sub)
         user_attrs = {a["Name"]: a["Value"] for a in cognito_resp["User"]["Attributes"]}
         tester_sub = user_attrs["sub"]
     except ClientError as e:
         if e.response["Error"]["Code"] == "UsernameExistsException":
-            # User already exists — look up their sub and role
             user_data = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=email)
             user_attrs = {a["Name"]: a["Value"] for a in user_data["UserAttributes"]}
             if user_attrs.get("custom:role") == "admin":
@@ -78,14 +75,24 @@ def invite_tester(event: dict, admin_sub: str, admin_role: str) -> dict:
 
     tester_id = str(tester_sub)
 
-    # Check if already a member of this project
-    existing_membership = table.get_item(
-        Key={"PK": f"PROJECT#{project_id}", "SK": f"MEMBER#{tester_id}"}
-    ).get("Item")
-    if existing_membership:
-        return response(400, {"error": "This tester is already a member of this project."})
+    # Check if already a member of any of this admin's projects
+    all_admin_projects = table.query(
+        IndexName="GSI1",
+        KeyConditionExpression=Key("GSI1PK").eq(f"ADMIN#{admin_sub}"),
+    ).get("Items", [])
+    admin_project_ids = {
+        item.get("projectId")
+        for item in all_admin_projects
+        if item.get("SK") == "METADATA" and item.get("projectId")
+    }
 
-    # Write user record if not exists
+    if any(
+        table.get_item(Key={"PK": f"PROJECT#{pid}", "SK": f"MEMBER#{tester_id}"}).get("Item")
+        for pid in admin_project_ids
+    ):
+        return response(400, {"error": "This tester is already a member of your organisation."})
+
+    # Write user profile if not exists
     try:
         table.put_item(
             Item={
@@ -102,16 +109,23 @@ def invite_tester(event: dict, admin_sub: str, admin_role: str) -> dict:
         if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
             raise
 
-    # Write project membership
-    table.put_item(
-        Item={
-            "PK": f"PROJECT#{project_id}",
-            "SK": f"MEMBER#{tester_id}",
-            "email": email,
-            "role": "tester",
-            "GSI1PK": f"USER#{tester_id}",
-            "GSI1SK": f"PROJECT#{project_id}",
-        }
-    )
+    # Add tester to ALL admin's existing projects
+    now = datetime.now(timezone.utc).isoformat()
+    for pid in admin_project_ids:
+        try:
+            table.put_item(
+                Item={
+                    "PK": f"PROJECT#{pid}",
+                    "SK": f"MEMBER#{tester_id}",
+                    "email": email,
+                    "role": "tester",
+                    "joinedAt": now,
+                    "GSI1PK": f"USER#{tester_id}",
+                    "GSI1SK": f"PROJECT#{pid}",
+                },
+                ConditionExpression="attribute_not_exists(SK)",
+            )
+        except Exception:
+            pass
 
     return response(200, {"message": "Tester invited", "testerId": tester_id})

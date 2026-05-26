@@ -83,6 +83,8 @@ export default function ProjectDetailPage() {
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editStatus, setEditStatus] = useState<BugStatus>("Open");
+  const [editScreenshots, setEditScreenshots] = useState<string[]>([]);
+  const [editNewFiles, setEditNewFiles] = useState<File[]>([]);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState("");
 
@@ -207,6 +209,8 @@ export default function ProjectDetailPage() {
     setEditTitle(bug.title);
     setEditDesc(bug.description ?? "");
     setEditStatus(bug.status);
+    setEditScreenshots(bug.screenshots ?? []);
+    setEditNewFiles([]);
     setEditError("");
     setEditOpen(true);
   }
@@ -217,10 +221,22 @@ export default function ProjectDetailPage() {
     setEditSaving(true);
     setEditError("");
     try {
+      const uploadedKeys: string[] = [];
+      for (const file of editNewFiles) {
+        const { presignedUrl, s3Key } = await attachmentsApi.presign({
+          filename: file.name,
+          contentType: file.type,
+          projectId,
+        });
+        await uploadToS3(presignedUrl, file);
+        uploadedKeys.push(s3Key);
+      }
+
       const updated = await bugsApi.update(projectId, editBug.bugId, {
         title: editTitle.trim(),
         description: editDesc.trim(),
         status: editStatus !== editBug.status ? editStatus : undefined,
+        screenshots: [...editScreenshots, ...uploadedKeys],
       });
       setBugs((prev) => prev.map((b) => b.bugId === updated.bugId ? updated : b));
       if (selectedBug?.bugId === updated.bugId) setSelectedBug(updated);
@@ -806,8 +822,8 @@ export default function ProjectDetailPage() {
       </Dialog>
 
       {/* Edit Bug Dialog */}
-      <Dialog open={editOpen} onOpenChange={(o) => { setEditOpen(o); if (!o) setEditError(""); }}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={editOpen} onOpenChange={(o) => { setEditOpen(o); if (!o) { setEditError(""); setEditNewFiles([]); } }}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Bug</DialogTitle>
           </DialogHeader>
@@ -833,17 +849,87 @@ export default function ProjectDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-status">Status</Label>
-                <select
-                  id="edit-status"
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value as BugStatus)}
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
+                <Label>Status</Label>
+                <div className="flex flex-wrap gap-2">
                   {getEditableStatuses(editBug).map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setEditStatus(s)}
+                      className={cn(
+                        "px-3 py-1 rounded-full text-xs font-semibold border transition-colors",
+                        editStatus === s
+                          ? s === "Open" && "bg-blue-100 text-blue-700 border-blue-300"
+                            || s === "Fixed" && "bg-green-100 text-green-700 border-green-300"
+                            || s === "Verified" && "bg-purple-100 text-purple-700 border-purple-300"
+                            || "bg-red-100 text-red-700 border-red-300"
+                          : "border-border text-muted-foreground hover:bg-muted/50"
+                      )}
+                    >
+                      {s}
+                    </button>
                   ))}
-                </select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Screenshots</Label>
+                {editScreenshots.length > 0 && (
+                  <div className="space-y-1.5">
+                    {editScreenshots.map((key, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-muted/40 text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Image className="w-4 h-4 text-primary shrink-0" />
+                          <span className="truncate text-sm">
+                            {key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop()}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEditScreenshots((prev) => prev.filter((_, j) => j !== i))}
+                          className="text-muted-foreground hover:text-destructive shrink-0"
+                          title="Remove screenshot"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <label className="flex items-center justify-center gap-2 w-full h-16 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors text-sm text-muted-foreground">
+                  <Upload className="w-4 h-4" />
+                  Upload new screenshots
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      setEditNewFiles((prev) => [...prev, ...files].slice(0, Math.max(0, 6 - editScreenshots.length)));
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                {editNewFiles.length > 0 && (
+                  <div className="space-y-1.5">
+                    {editNewFiles.map((file, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-dashed border-primary/30 text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Image className="w-4 h-4 text-primary shrink-0" />
+                          <span className="truncate">{file.name}</span>
+                          <span className="text-xs text-muted-foreground shrink-0">New</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEditNewFiles((prev) => prev.filter((_, j) => j !== i))}
+                          className="text-muted-foreground hover:text-destructive shrink-0"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               {editError && <p className="text-sm text-destructive">{editError}</p>}
               <div className="flex justify-end gap-3 pt-2">

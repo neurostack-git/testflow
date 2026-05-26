@@ -32,6 +32,13 @@ export const projectsApi = {
     }),
   get: (projectId: string) =>
     request<Project>(`/projects/${projectId}`),
+  softDelete: (projectId: string) =>
+    request(`/projects/${projectId}`, { method: "DELETE" }),
+  listBin: () => request<{ projects: Project[] }>("/projects/bin"),
+  restore: (projectId: string) =>
+    request(`/projects/${projectId}/restore`, { method: "POST" }),
+  permanentDelete: (projectId: string) =>
+    request(`/projects/${projectId}/permanent`, { method: "DELETE" }),
   listMembers: (projectId: string) =>
     request<{ members: Member[] }>(`/projects/${projectId}/members`),
   removeMember: (projectId: string, memberId: string) =>
@@ -134,6 +141,7 @@ export interface Project {
   title: string;
   createdAt: string;
   testerCount?: number;
+  deletedAt?: string;
 }
 
 export interface Bug {
@@ -161,6 +169,7 @@ export interface UpdateBugPayload {
   title?: string;
   description?: string;
   status?: BugStatus;
+  screenshots?: string[];
 }
 
 export interface PresignPayload {

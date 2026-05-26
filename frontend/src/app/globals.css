@@ -84,6 +84,22 @@
   --sidebar-ring: oklch(0.72 0.15 50);
 }
 
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-fade-in {
+  animation: fade-in 0.5s ease both;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

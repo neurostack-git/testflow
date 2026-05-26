@@ -3,13 +3,16 @@ import os
 import uuid
 import boto3
 from boto3.dynamodb.conditions import Key
+from botocore.config import Config
 from datetime import datetime, timezone
 
 dynamodb = boto3.resource("dynamodb")
 lambda_client = boto3.client("lambda")
+s3 = boto3.client("s3", config=Config(signature_version="s3v4"))
 
 TABLE_NAME = os.environ["TABLE_NAME"]
 NOTIFICATIONS_FN_ARN = os.environ.get("NOTIFICATIONS_FN_ARN", "")
+BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
 table = dynamodb.Table(TABLE_NAME)
 
 _ALL = ["Open", "Fixed", "Verified", "Reopen"]
@@ -71,7 +74,6 @@ def list_bugs(project_id: str, user_sub: str, user_role: str) -> dict:
     )
     bugs = result.get("Items", [])
 
-    # Enrich with reporter display names
     reporter_subs = {b.get("reportedBy") for b in bugs if b.get("reportedBy")}
     name_map = {}
     for sub in reporter_subs:
@@ -126,9 +128,6 @@ def get_bug(project_id: str, bug_id: str, user_sub: str, user_role: str) -> dict
     if not item:
         return response(404, {"error": "Bug not found"})
 
-    if user_role == "tester" and item.get("reportedBy") != user_sub:
-        return response(403, {"error": "Forbidden"})
-
     return response(200, item)
 
 
@@ -153,8 +152,7 @@ def update_bug(event: dict, project_id: str, bug_id: str, user_sub: str, user_ro
 
     if new_status and new_status != bug.get("status"):
         if user_role == "admin":
-            valid_statuses = ["Open", "Fixed", "Verified", "Reopen"]
-            if new_status not in valid_statuses:
+            if new_status not in _ALL:
                 return response(400, {"error": "Invalid status"})
         else:
             current_status = bug.get("status", "")
@@ -162,20 +160,36 @@ def update_bug(event: dict, project_id: str, bug_id: str, user_sub: str, user_ro
             if new_status not in allowed:
                 return response(400, {"error": f"Cannot transition to {new_status}"})
 
+    if not new_status or new_status == bug.get("status"):
+        new_status = bug.get("status")
+
     now = datetime.now(timezone.utc).isoformat()
-    expr_values = {":t": title, ":d": description, ":ts": now}
+    expr_names = {}
+    expr_values = {":t": title, ":d": description, ":ts": now, ":s": new_status}
+    expr_names["#s"] = "status"
+    update_parts = ["title = :t", "description = :d", "#s = :s", "updatedAt = :ts"]
+
+    # Handle screenshots: delete removed S3 keys, update list
+    new_screenshots = None
+    if "screenshots" in body:
+        new_screenshots = body["screenshots"]
+        old_screenshots = bug.get("screenshots", [])
+        removed_keys = [k for k in old_screenshots if k not in new_screenshots]
+        for key in removed_keys:
+            if BUCKET_NAME and key:
+                try:
+                    s3.delete_object(Bucket=BUCKET_NAME, Key=key)
+                except Exception:
+                    pass
+        expr_values[":sc"] = new_screenshots
+        update_parts.append("screenshots = :sc")
+
     update_kwargs = {
         "Key": {"PK": f"PROJECT#{project_id}", "SK": f"BUG#{bug_id}"},
+        "UpdateExpression": "SET " + ", ".join(update_parts),
         "ExpressionAttributeValues": expr_values,
+        "ExpressionAttributeNames": expr_names,
     }
-
-    if new_status and new_status != bug.get("status"):
-        expr_values[":s"] = new_status
-        update_kwargs["UpdateExpression"] = "SET title = :t, description = :d, #s = :s, updatedAt = :ts"
-        update_kwargs["ExpressionAttributeNames"] = {"#s": "status"}
-    else:
-        update_kwargs["UpdateExpression"] = "SET title = :t, description = :d, updatedAt = :ts"
-        new_status = bug.get("status")
 
     table.update_item(**update_kwargs)
 
@@ -199,6 +213,8 @@ def update_bug(event: dict, project_id: str, bug_id: str, user_sub: str, user_ro
         )
 
     updated = {**bug, "title": title, "description": description, "status": new_status, "updatedAt": now}
+    if new_screenshots is not None:
+        updated["screenshots"] = new_screenshots
     return response(200, updated)
 
 
@@ -229,12 +245,10 @@ def update_status(event: dict, project_id: str, bug_id: str, user_sub: str, user
         ExpressionAttributeValues={":s": new_status, ":ts": now},
     )
 
-    # Trigger notification when admin marks as Fixed
     if new_status == "Fixed" and NOTIFICATIONS_FN_ARN:
         reporter_sub = bug.get("reportedBy")
         reporter = table.get_item(Key={"PK": f"USER#{reporter_sub}", "SK": "PROFILE"}).get("Item", {})
         proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item", {})
-
         lambda_client.invoke(
             FunctionName=NOTIFICATIONS_FN_ARN,
             InvocationType="Event",

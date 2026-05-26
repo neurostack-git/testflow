@@ -46,27 +46,33 @@ export default function LoginPage() {
         style={{ background: "linear-gradient(145deg, oklch(0.72 0.15 50) 0%, oklch(0.60 0.17 44) 100%)" }}
       >
         <div className="flex items-center gap-3">
-          <img src="/logo.svg" alt="TestFlow" className="w-9 h-9 rounded-xl" />
+          <img src="/logo.svg" alt="TestFlow" className="w-9 h-9 rounded-xl ring-2 ring-white/40" />
           <span className="text-xl font-extrabold tracking-tight">TestFlow</span>
         </div>
 
         <div className="space-y-10">
           <div>
             <h1 className="text-[2.6rem] font-extrabold leading-[1.15] mb-4 tracking-tight">
-              Streamline your<br />bug reporting workflow
+              <span className="inline-block animate-fade-up" style={{ animationDelay: "0ms" }}>
+                Streamline your
+              </span>
+              <br />
+              <span className="inline-block animate-fade-up" style={{ animationDelay: "160ms" }}>
+                bug reporting workflow
+              </span>
             </h1>
-            <p className="text-white/75 text-lg leading-relaxed font-medium">
+            <p className="text-white/75 text-lg leading-relaxed font-medium animate-fade-up" style={{ animationDelay: "300ms" }}>
               One place to capture, track, and resolve bugs — fast.
             </p>
           </div>
           <div className="space-y-5">
             {[
-              { icon: Bug, title: "Report bugs instantly", desc: "Screenshots, files, descriptions — in seconds." },
-              { icon: CheckCircle, title: "Track resolution status", desc: "Open → Fixed → Verified. Clear lifecycle." },
-              { icon: Zap, title: "Get notified instantly", desc: "Email & WhatsApp when a bug is ready to retest." },
-              { icon: Users, title: "Invite your team", desc: "Create projects and add testers with one click." },
-            ].map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="flex items-start gap-4">
+              { icon: Bug, title: "Report bugs instantly", desc: "Screenshots, files, descriptions — in seconds.", delay: 400 },
+              { icon: CheckCircle, title: "Track resolution status", desc: "Open → Fixed → Verified. Clear lifecycle.", delay: 480 },
+              { icon: Zap, title: "Get notified instantly", desc: "Email & WhatsApp when a bug is ready to retest.", delay: 560 },
+              { icon: Users, title: "Invite your team", desc: "Create projects and add testers with one click.", delay: 640 },
+            ].map(({ icon: Icon, title, desc, delay }) => (
+              <div key={title} className="flex items-start gap-4 animate-fade-up" style={{ animationDelay: `${delay}ms` }}>
                 <div className="w-9 h-9 bg-white/15 rounded-lg flex items-center justify-center shrink-0 mt-0.5">
                   <Icon className="w-4 h-4 text-white" />
                 </div>

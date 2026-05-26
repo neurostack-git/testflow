@@ -6,18 +6,15 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, FolderOpen, Bug } from "lucide-react";
+import { Plus, FolderOpen, Bug, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { projectsApi, type Project } from "@/lib/api";
-
-const STATUS_COLORS = {
-  Open: "bg-blue-100 text-blue-700",
-  Fixed: "bg-green-100 text-green-700",
-  Verified: "bg-purple-100 text-purple-700",
-  Reopen: "bg-red-100 text-red-700",
-};
+import { useAuth } from "@/context/auth-context";
 
 export default function DashboardPage() {
+  const { user } = useAuth();
+  const role = user?.role ?? "tester";
+
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -48,6 +45,16 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleSoftDelete(projectId: string, title: string) {
+    if (!confirm(`Move "${title}" to bin?`)) return;
+    try {
+      await projectsApi.softDelete(projectId);
+      setProjects((prev) => prev.filter((p) => p.projectId !== projectId));
+    } catch {
+      setError("Failed to delete project");
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center min-h-64">
@@ -65,10 +72,12 @@ export default function DashboardPage() {
             {projects.length} project{projects.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <Button onClick={() => setOpen(true)} className="bg-primary hover:bg-primary/90 gap-2">
-          <Plus className="w-4 h-4" />
-          New Project
-        </Button>
+        {role === "admin" && (
+          <Button onClick={() => setOpen(true)} className="bg-primary hover:bg-primary/90 gap-2">
+            <Plus className="w-4 h-4" />
+            New Project
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -81,33 +90,50 @@ export default function DashboardPage() {
             <FolderOpen className="w-7 h-7 text-primary" />
           </div>
           <h3 className="text-lg font-semibold text-foreground">No projects yet</h3>
-          <p className="text-muted-foreground mt-1 mb-6">Create your first project to start tracking bugs.</p>
-          <Button onClick={() => setOpen(true)} className="bg-primary hover:bg-primary/90 gap-2">
-            <Plus className="w-4 h-4" />
-            New Project
-          </Button>
+          {role === "admin" ? (
+            <>
+              <p className="text-muted-foreground mt-1 mb-6">Create your first project to start tracking bugs.</p>
+              <Button onClick={() => setOpen(true)} className="bg-primary hover:bg-primary/90 gap-2">
+                <Plus className="w-4 h-4" />
+                New Project
+              </Button>
+            </>
+          ) : (
+            <p className="text-muted-foreground mt-1">You haven&apos;t been added to any projects yet.</p>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
           {projects.map((project) => (
-            <Link key={project.projectId} href={`/projects/${project.projectId}`}>
-              <Card className="p-5 hover:shadow-md hover:border-primary/30 transition-all cursor-pointer group">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center group-hover:bg-primary/15 transition-colors">
-                    <Bug className="w-5 h-5 text-primary" />
+            <div key={project.projectId} className="relative group">
+              <Link href={`/projects/${project.projectId}`} className="block">
+                <Card className="p-5 hover:shadow-md hover:border-primary/30 transition-all cursor-pointer">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center group-hover:bg-primary/15 transition-colors">
+                      <Bug className="w-5 h-5 text-primary" />
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(project.createdAt).toLocaleDateString()}
+                    </span>
                   </div>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(project.createdAt).toLocaleDateString()}
-                  </span>
-                </div>
-                <h3 className="font-semibold text-foreground text-base mb-1 group-hover:text-primary transition-colors">
-                  {project.title}
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  {project.testerCount ?? 0} tester{(project.testerCount ?? 0) !== 1 ? "s" : ""}
-                </p>
-              </Card>
-            </Link>
+                  <h3 className="font-semibold text-foreground text-base mb-1 group-hover:text-primary transition-colors">
+                    {project.title}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {project.testerCount ?? 0} tester{(project.testerCount ?? 0) !== 1 ? "s" : ""}
+                  </p>
+                </Card>
+              </Link>
+              {role === "admin" && (
+                <button
+                  onClick={() => handleSoftDelete(project.projectId, project.title)}
+                  className="absolute top-3 right-3 z-10 p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
+                  title="Move to bin"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
