@@ -77,21 +77,27 @@ export default function SignupPage() {
         style={{ background: "linear-gradient(145deg, oklch(0.72 0.15 50) 0%, oklch(0.60 0.17 44) 100%)" }}
       >
         <div className="flex items-center gap-3">
-          <img src="/logo.svg" alt="TestFlow" className="w-9 h-9 rounded-xl" />
+          <img src="/logo.svg" alt="TestFlow" className="w-9 h-9 rounded-xl ring-2 ring-white/40" />
           <span className="text-xl font-extrabold tracking-tight">TestFlow</span>
         </div>
         <div className="space-y-10">
           <div>
             <h1 className="text-[2.6rem] font-extrabold leading-[1.15] mb-4 tracking-tight">
-              Start managing bugs<br />the right way
+              <span className="inline-block tf-fade-up" style={{ "--anim-delay": "0ms" } as React.CSSProperties}>
+                Start managing bugs
+              </span>
+              <br />
+              <span className="inline-block tf-fade-up" style={{ "--anim-delay": "180ms" } as React.CSSProperties}>
+                the right way
+              </span>
             </h1>
-            <p className="text-white/75 text-lg leading-relaxed font-medium">
+            <p className="text-white/75 text-lg leading-relaxed font-medium tf-fade-up" style={{ "--anim-delay": "340ms" } as React.CSSProperties}>
               Create your admin account, set up projects, and invite testers in minutes.
             </p>
           </div>
           <div className="space-y-5">
-            {features.map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="flex items-start gap-4">
+            {features.map(({ icon: Icon, title, desc }, i) => (
+              <div key={title} className="flex items-start gap-4 tf-fade-up" style={{ "--anim-delay": `${460 + i * 80}ms` } as React.CSSProperties}>
                 <div className="w-9 h-9 bg-white/15 rounded-lg flex items-center justify-center shrink-0 mt-0.5">
                   <Icon className="w-4 h-4 text-white" />
                 </div>

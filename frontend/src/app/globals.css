@@ -84,20 +84,19 @@
   --sidebar-ring: oklch(0.72 0.15 50);
 }
 
-@keyframes fade-up {
-  from { opacity: 0; transform: translateY(22px); }
+@keyframes tf-fade-up {
+  from { opacity: 0; transform: translateY(30px); }
   to   { opacity: 1; transform: translateY(0);    }
 }
-@keyframes fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
 
-.animate-fade-up {
-  animation: fade-up 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.animate-fade-in {
-  animation: fade-in 0.5s ease both;
+@layer utilities {
+  .tf-fade-up {
+    animation-name: tf-fade-up;
+    animation-duration: 0.8s;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    animation-fill-mode: both;
+    animation-delay: var(--anim-delay, 0ms);
+  }
 }
 
 @layer base {

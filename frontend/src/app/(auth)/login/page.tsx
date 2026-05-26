@@ -53,26 +53,26 @@ export default function LoginPage() {
         <div className="space-y-10">
           <div>
             <h1 className="text-[2.6rem] font-extrabold leading-[1.15] mb-4 tracking-tight">
-              <span className="inline-block animate-fade-up" style={{ animationDelay: "0ms" }}>
+              <span className="inline-block tf-fade-up" style={{ "--anim-delay": "0ms" } as React.CSSProperties}>
                 Streamline your
               </span>
               <br />
-              <span className="inline-block animate-fade-up" style={{ animationDelay: "160ms" }}>
+              <span className="inline-block tf-fade-up" style={{ "--anim-delay": "180ms" } as React.CSSProperties}>
                 bug reporting workflow
               </span>
             </h1>
-            <p className="text-white/75 text-lg leading-relaxed font-medium animate-fade-up" style={{ animationDelay: "300ms" }}>
+            <p className="text-white/75 text-lg leading-relaxed font-medium tf-fade-up" style={{ "--anim-delay": "340ms" } as React.CSSProperties}>
               One place to capture, track, and resolve bugs — fast.
             </p>
           </div>
           <div className="space-y-5">
             {[
-              { icon: Bug, title: "Report bugs instantly", desc: "Screenshots, files, descriptions — in seconds.", delay: 400 },
-              { icon: CheckCircle, title: "Track resolution status", desc: "Open → Fixed → Verified. Clear lifecycle.", delay: 480 },
-              { icon: Zap, title: "Get notified instantly", desc: "Email & WhatsApp when a bug is ready to retest.", delay: 560 },
-              { icon: Users, title: "Invite your team", desc: "Create projects and add testers with one click.", delay: 640 },
+              { icon: Bug, title: "Report bugs instantly", desc: "Screenshots, files, descriptions — in seconds.", delay: 460 },
+              { icon: CheckCircle, title: "Track resolution status", desc: "Open → Fixed → Verified. Clear lifecycle.", delay: 540 },
+              { icon: Zap, title: "Get notified instantly", desc: "Email & WhatsApp when a bug is ready to retest.", delay: 620 },
+              { icon: Users, title: "Invite your team", desc: "Create projects and add testers with one click.", delay: 700 },
             ].map(({ icon: Icon, title, desc, delay }) => (
-              <div key={title} className="flex items-start gap-4 animate-fade-up" style={{ animationDelay: `${delay}ms` }}>
+              <div key={title} className="flex items-start gap-4 tf-fade-up" style={{ "--anim-delay": `${delay}ms` } as React.CSSProperties}>
                 <div className="w-9 h-9 bg-white/15 rounded-lg flex items-center justify-center shrink-0 mt-0.5">
                   <Icon className="w-4 h-4 text-white" />
                 </div>
