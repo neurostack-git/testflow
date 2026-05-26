@@ -10,13 +10,11 @@ import { useAuth } from "@/context/auth-context";
 const adminNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin", label: "Admin", icon: Settings2 },
-  { href: "/bin", label: "Bin", icon: Trash2 },
   { href: "/profile", label: "Profile", icon: User },
 ];
 
 const testerNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/bin", label: "Bin", icon: Trash2 },
   { href: "/profile", label: "Profile", icon: User },
 ];
 
@@ -77,9 +75,9 @@ export function Sidebar({ role, userName, userEmail }: SidebarProps) {
         ))}
       </nav>
 
-      {/* User + Logout */}
-      <div className="px-4 py-4 border-t border-border space-y-3">
-        <div className="flex items-center gap-3">
+      {/* User + Bin + Logout */}
+      <div className="px-4 py-4 border-t border-border space-y-1">
+        <div className="flex items-center gap-3 px-3 py-2 mb-2">
           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm shrink-0">
             {userName.charAt(0).toUpperCase()}
           </div>
@@ -88,6 +86,18 @@ export function Sidebar({ role, userName, userEmail }: SidebarProps) {
             <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
           </div>
         </div>
+        <Link
+          href="/bin"
+          className={cn(
+            "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+            pathname === "/bin"
+              ? "bg-primary text-white"
+              : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          )}
+        >
+          <Trash2 className="w-4 h-4" />
+          Bin
+        </Link>
         <button
           onClick={() => logout()}
           className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
