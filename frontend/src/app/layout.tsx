@@ -17,7 +17,6 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "TestFlow",
   description: "Bug reporting and tracking for testers",
-  icons: { icon: "/logo.svg" },
 };
 
 export default function RootLayout({
