@@ -22,6 +22,11 @@ export default function DashboardPage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
+  const [binConfirm, setBinConfirm] = useState<{ open: boolean; projectId: string; title: string }>({
+    open: false, projectId: "", title: "",
+  });
+  const [binning, setBinning] = useState(false);
+
   useEffect(() => {
     projectsApi.list()
       .then((res) => setProjects(res.projects))
@@ -45,13 +50,16 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleSoftDelete(projectId: string, title: string) {
-    if (!confirm(`Move "${title}" to bin?`)) return;
+  async function confirmSoftDelete() {
+    setBinning(true);
     try {
-      await projectsApi.softDelete(projectId);
-      setProjects((prev) => prev.filter((p) => p.projectId !== projectId));
+      await projectsApi.softDelete(binConfirm.projectId);
+      setProjects((prev) => prev.filter((p) => p.projectId !== binConfirm.projectId));
+      setBinConfirm({ open: false, projectId: "", title: "" });
     } catch {
-      setError("Failed to delete project");
+      setError("Failed to move project to bin");
+    } finally {
+      setBinning(false);
     }
   }
 
@@ -128,7 +136,7 @@ export default function DashboardPage() {
               </Link>
               {role === "admin" && (
                 <button
-                  onClick={() => handleSoftDelete(project.projectId, project.title)}
+                  onClick={() => setBinConfirm({ open: true, projectId: project.projectId, title: project.title })}
                   className="absolute top-3 right-3 z-10 p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
                   title="Move to bin"
                 >
@@ -140,6 +148,7 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* New Project Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -164,6 +173,42 @@ export default function DashboardPage() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Move to Bin Confirmation Dialog */}
+      <Dialog open={binConfirm.open} onOpenChange={(o) => !binning && setBinConfirm({ open: o, projectId: "", title: "" })}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Move to Bin?</DialogTitle>
+          </DialogHeader>
+          <div className="mt-1 space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-muted rounded-xl flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="font-semibold text-foreground text-sm">{binConfirm.title}</p>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  This project will be moved to the Bin. You can restore it anytime.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setBinConfirm({ open: false, projectId: "", title: "" })} disabled={binning}>
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                className="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                onClick={confirmSoftDelete}
+                disabled={binning}
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                {binning ? "Moving…" : "Move to Bin"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

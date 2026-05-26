@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Trash2, RotateCcw, FolderOpen } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Trash2, RotateCcw, FolderOpen, AlertTriangle } from "lucide-react";
 import { projectsApi, type Project } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 
@@ -13,6 +14,11 @@ export default function BinPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; projectId: string; title: string }>({
+    open: false, projectId: "", title: "",
+  });
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     projectsApi.listBin()
@@ -30,13 +36,16 @@ export default function BinPage() {
     }
   }
 
-  async function handlePermanentDelete(projectId: string, title: string) {
-    if (!confirm(`Permanently delete "${title}"? All bugs and data will be lost. This cannot be undone.`)) return;
+  async function confirmPermanentDelete() {
+    setDeleting(true);
     try {
-      await projectsApi.permanentDelete(projectId);
-      setProjects((prev) => prev.filter((p) => p.projectId !== projectId));
+      await projectsApi.permanentDelete(deleteConfirm.projectId);
+      setProjects((prev) => prev.filter((p) => p.projectId !== deleteConfirm.projectId));
+      setDeleteConfirm({ open: false, projectId: "", title: "" });
     } catch {
       setError("Failed to permanently delete project");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -100,7 +109,7 @@ export default function BinPage() {
                     size="sm"
                     variant="outline"
                     className="gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
-                    onClick={() => handlePermanentDelete(project.projectId, project.title)}
+                    onClick={() => setDeleteConfirm({ open: true, projectId: project.projectId, title: project.title })}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     Delete
@@ -111,6 +120,46 @@ export default function BinPage() {
           ))}
         </div>
       )}
+
+      {/* Permanent Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirm.open} onOpenChange={(o) => !deleting && setDeleteConfirm({ open: o, projectId: "", title: "" })}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete permanently?</DialogTitle>
+          </DialogHeader>
+          <div className="mt-1 space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-destructive/10 rounded-xl flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-destructive" />
+              </div>
+              <div>
+                <p className="font-semibold text-foreground text-sm">{deleteConfirm.title}</p>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  All bugs, screenshots, and data will be permanently lost. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setDeleteConfirm({ open: false, projectId: "", title: "" })}
+                disabled={deleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                className="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                onClick={confirmPermanentDelete}
+                disabled={deleting}
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                {deleting ? "Deleting…" : "Delete forever"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
