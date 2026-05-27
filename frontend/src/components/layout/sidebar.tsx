@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
-import { LayoutDashboard, Settings2, User, LogOut, Trash2 } from "lucide-react";
+import { LayoutDashboard, Settings2, User, LogOut, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
 
@@ -18,20 +18,28 @@ const testerNav = [
   { href: "/profile", label: "Profile", icon: User },
 ];
 
-const INACTIVITY_MS = 10 * 60 * 1000; // 10 minutes
+const INACTIVITY_MS = 10 * 60 * 1000;
 const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"] as const;
 
 interface SidebarProps {
   role: "admin" | "tester";
   userName: string;
   userEmail: string;
+  open: boolean;
+  onClose: () => void;
 }
 
-export function Sidebar({ role, userName, userEmail }: SidebarProps) {
+export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { logout } = useAuth();
   const nav = role === "admin" ? adminNav : testerNav;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Close sidebar when navigating (mobile)
+  useEffect(() => {
+    onClose();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   useEffect(() => {
     function resetTimer() {
@@ -49,11 +57,30 @@ export function Sidebar({ role, userName, userEmail }: SidebarProps) {
   }, [logout]);
 
   return (
-    <aside className="w-60 shrink-0 flex flex-col border-r border-border bg-sidebar h-screen sticky top-0">
+    <aside
+      className={cn(
+        "flex flex-col border-r border-border bg-sidebar h-screen w-60 shrink-0",
+        // Mobile: fixed overlay drawer with slide animation
+        "fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out",
+        // Desktop: sticky in normal flow, always visible
+        "lg:sticky lg:top-0 lg:z-auto lg:translate-x-0",
+        // Mobile open/closed
+        open ? "translate-x-0 shadow-2xl" : "-translate-x-full"
+      )}
+    >
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-5 py-5 border-b border-border">
-        <img src="/logo.svg" alt="TestFlow" className="w-8 h-8 rounded-lg" />
-        <span className="text-lg font-bold text-foreground tracking-tight">TestFlow</span>
+      <div className="flex items-center justify-between px-5 py-5 border-b border-border">
+        <div className="flex items-center gap-2.5">
+          <img src="/logo.svg" alt="TestFlow" className="w-8 h-8 rounded-lg" />
+          <span className="text-lg font-bold text-foreground tracking-tight">TestFlow</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="lg:hidden p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          aria-label="Close menu"
+        >
+          <X className="w-4 h-4" />
+        </button>
       </div>
 
       {/* Nav */}

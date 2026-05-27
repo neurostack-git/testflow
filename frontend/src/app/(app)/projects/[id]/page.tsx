@@ -397,7 +397,7 @@ export default function ProjectDetailPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-3">
@@ -423,7 +423,7 @@ export default function ProjectDetailPage() {
       {error && <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg mb-4">{error}</p>}
 
       {/* Bugs table */}
-      <div className="border border-border rounded-xl overflow-hidden bg-card">
+      <div className="border border-border rounded-xl overflow-x-auto bg-card">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/20">
           <span className="text-sm font-medium text-muted-foreground">{bugs.length} bugs</span>
           <Button

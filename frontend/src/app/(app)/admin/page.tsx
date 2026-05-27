@@ -111,7 +111,7 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-foreground">Admin</h1>
         <p className="text-muted-foreground mt-0.5">Manage projects and testers</p>
@@ -123,7 +123,7 @@ export default function AdminPage() {
 
       <div className="space-y-3">
         {projects.map((project) => (
-          <div key={project.projectId} className="border border-border rounded-xl overflow-hidden bg-card">
+          <div key={project.projectId} className="border border-border rounded-xl overflow-x-auto bg-card">
             <div
               className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-muted/40 transition-colors"
               onClick={() => toggleExpand(project.projectId)}
