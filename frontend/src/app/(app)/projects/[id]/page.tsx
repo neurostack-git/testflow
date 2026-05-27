@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,49 +17,65 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  ArrowLeft, Plus, ChevronDown, FileText, Image, X, Upload,
-  UserPlus, Pencil, Download, Trash2, Eye, AlertTriangle,
-  CircleDot, CheckCircle2, BadgeCheck, RotateCcw,
+  ArrowLeft, Plus, ChevronDown, ChevronLeft, ChevronRight,
+  FileText, Image, X, Upload, UserPlus, Pencil, Download,
+  Trash2, Eye, AlertTriangle, CircleDot, CheckCircle2,
+  BadgeCheck, Ban, Video, Info, Search, Check,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import {
-  projectsApi, bugsApi, attachmentsApi, authApi, uploadToS3,
+  projectsApi, bugsApi, attachmentsApi, authApi, uploadToS3, uploadToS3WithProgress,
   type Project, type Bug, type BugStatus, type ProjectReport,
 } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 
-const STATUS_STYLES: Record<BugStatus, string> = {
-  Open: "bg-blue-100 text-blue-700 hover:bg-blue-200",
-  Fixed: "bg-green-100 text-green-700 hover:bg-green-200",
+const STATUS_STYLES: Record<string, string> = {
+  Open:     "bg-blue-100 text-blue-700 hover:bg-blue-200",
+  Fixed:    "bg-green-100 text-green-700 hover:bg-green-200",
+  Closed:   "bg-purple-100 text-purple-700 hover:bg-purple-200",
+  Invalid:  "bg-gray-100 text-gray-600 hover:bg-gray-200",
   Verified: "bg-purple-100 text-purple-700 hover:bg-purple-200",
-  Reopen: "bg-red-100 text-red-700 hover:bg-red-200",
+  Reopen:   "bg-blue-100 text-blue-700 hover:bg-blue-200",
 };
 
-const ALL_STATUSES: BugStatus[] = ["Open", "Fixed", "Verified", "Reopen"];
+const ALL_STATUSES: BugStatus[] = ["Open", "Fixed", "Closed", "Invalid"];
 
-const STATUS_ICONS = {
-  Open: CircleDot,
-  Fixed: CheckCircle2,
+const STATUS_ICONS: Record<string, React.FC<{ className?: string }>> = {
+  Open:     CircleDot,
+  Fixed:    CheckCircle2,
+  Closed:   BadgeCheck,
+  Invalid:  Ban,
   Verified: BadgeCheck,
-  Reopen: RotateCcw,
-} as const;
+  Reopen:   CircleDot,
+};
 
-const STATUS_ICON_COLORS: Record<BugStatus, string> = {
-  Open: "text-blue-600",
-  Fixed: "text-green-600",
+const STATUS_ICON_COLORS: Record<string, string> = {
+  Open:     "text-blue-600",
+  Fixed:    "text-green-600",
+  Closed:   "text-purple-600",
+  Invalid:  "text-gray-500",
   Verified: "text-purple-600",
-  Reopen: "text-red-600",
+  Reopen:   "text-blue-600",
 };
 
-const ALL_TRANSITIONS: Record<BugStatus, BugStatus[]> = {
-  Open: ["Fixed", "Verified", "Reopen"],
-  Fixed: ["Open", "Verified", "Reopen"],
-  Verified: ["Open", "Fixed", "Reopen"],
-  Reopen: ["Open", "Fixed", "Verified"],
+const ADMIN_TRANSITIONS: Record<string, BugStatus[]> = {
+  Open:     ["Fixed", "Invalid"],
+  Fixed:    ["Invalid", "Open"],
+  Closed:   ["Open", "Fixed"],
+  Invalid:  ["Open"],
+  Verified: ["Open", "Fixed"],
+  Reopen:   ["Fixed", "Invalid"],
 };
-const ADMIN_TRANSITIONS = ALL_TRANSITIONS;
-const TESTER_TRANSITIONS = ALL_TRANSITIONS;
+
+const TESTER_TRANSITIONS: Record<string, BugStatus[]> = {
+  Open:     [],
+  Fixed:    ["Closed", "Open"],
+  Closed:   ["Open"],
+  Invalid:  [],
+  Verified: ["Open"],
+  Reopen:   ["Closed"],
+};
 
 const REPORT_ACCEPT = ".md,.txt,.pdf,.docx,text/markdown,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const REPORT_CONTENT_TYPES: Record<string, string> = {
@@ -65,6 +84,10 @@ const REPORT_CONTENT_TYPES: Record<string, string> = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 };
+
+function trimName(name: string, max = 48): string {
+  return name.length > max ? name.slice(0, max) + "…" : name;
+}
 
 function getContentType(file: File): string {
   if (file.type) return file.type;
@@ -107,11 +130,30 @@ export default function ProjectDetailPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState("");
 
-  // Screenshot lightbox
-  const [lightboxKey, setLightboxKey] = useState<string | null>(null);
+  // Screenshot lightbox (carousel)
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxScreenshots, setLightboxScreenshots] = useState<string[]>([]);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [lightboxFilename, setLightboxFilename] = useState<string>("");
   const [lightboxLoading, setLightboxLoading] = useState(false);
+  // Cache presigned URLs so navigating back doesn't re-fetch (URLs valid 1 hour)
+  const lightboxUrlCache = React.useRef<Record<string, { url: string; filename: string }>>({});
+
+  // Video player
+  const [videoPlayer, setVideoPlayer] = useState<{ url: string; filename: string } | null>(null);
+  const [videoPlayerLoading, setVideoPlayerLoading] = useState<string | null>(null);
+
+  // Status info dialog
+  const [statusInfoOpen, setStatusInfoOpen] = useState(false);
+
+  // New video files for bug creation / edit
+  const [newBugVideoFiles, setNewBugVideoFiles] = useState<File[]>([]);
+  const [editVideos, setEditVideos] = useState<string[]>([]);
+  const [editNewVideoFiles, setEditNewVideoFiles] = useState<File[]>([]);
+
+  // Video upload progress: key = "create_0", "edit_0", etc. → 0-100
+  const [videoProgress, setVideoProgress] = useState<Record<string, number>>({});
 
   // Invite tester dialog
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -123,9 +165,34 @@ export default function ProjectDetailPage() {
   const [stagedReports, setStagedReports] = useState<File[]>([]);
   const [uploadingReports, setUploadingReports] = useState(false);
   const [reportError, setReportError] = useState("");
+  const [reportViewer, setReportViewer] = useState<{ url: string; filename: string; contentType: string; textContent?: string } | null>(null);
+  const [reportViewLoading, setReportViewLoading] = useState<string | null>(null);
+
+  // Status tab filter + search
+  const [activeTab, setActiveTab] = useState("All");
+  const [bugSearch, setBugSearch] = useState("");
 
   const role = user?.role ?? "tester";
   const transitions = role === "admin" ? ADMIN_TRANSITIONS : TESTER_TRANSITIONS;
+
+  const TAB_KEYS = ["All", "Open", "Fixed", "Closed", "Invalid"] as const;
+  const tabCount = (tab: string) => {
+    if (tab === "All") return bugs.length;
+    if (tab === "Open") return bugs.filter(b => b.status === "Open" || (b.status as string) === "Reopen").length;
+    if (tab === "Closed") return bugs.filter(b => b.status === "Closed" || (b.status as string) === "Verified").length;
+    return bugs.filter(b => b.status === tab).length;
+  };
+  const tabFilteredBugs = activeTab === "All" ? bugs
+    : activeTab === "Open" ? bugs.filter(b => b.status === "Open" || (b.status as string) === "Reopen")
+    : activeTab === "Closed" ? bugs.filter(b => b.status === "Closed" || (b.status as string) === "Verified")
+    : bugs.filter(b => b.status === activeTab);
+  const searchQuery = bugSearch.trim().toLowerCase();
+  const filteredBugs = searchQuery
+    ? tabFilteredBugs.filter(b =>
+        b.title.toLowerCase().includes(searchQuery) ||
+        b.description.toLowerCase().includes(searchQuery)
+      )
+    : tabFilteredBugs;
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -173,12 +240,13 @@ export default function ProjectDetailPage() {
     setNewBugTitle("");
     setNewBugDesc("");
     setNewBugFiles([]);
+    setNewBugVideoFiles([]);
     setDialogOpen(true);
   }
 
   function handleFileAdd(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
-    setNewBugFiles((prev) => [...prev, ...files].slice(0, 6));
+    setNewBugFiles((prev) => [...prev, ...files].slice(0, 10));
     e.target.value = "";
   }
 
@@ -190,6 +258,7 @@ export default function ProjectDetailPage() {
     try {
       const screenshots: string[] = [];
       const documents: string[] = [];
+      const videos: string[] = [];
 
       for (const file of newBugFiles) {
         const { presignedUrl, s3Key } = await attachmentsApi.presign({
@@ -198,22 +267,35 @@ export default function ProjectDetailPage() {
           projectId,
         });
         await uploadToS3(presignedUrl, file);
-        if (file.type.startsWith("image/")) {
-          screenshots.push(s3Key);
-        } else {
-          documents.push(s3Key);
-        }
+        screenshots.push(s3Key);
       }
+
+      for (let vi = 0; vi < newBugVideoFiles.length; vi++) {
+        const file = newBugVideoFiles[vi];
+        const { presignedUrl, s3Key } = await attachmentsApi.presign({
+          filename: file.name,
+          contentType: file.type,
+          projectId,
+        });
+        setVideoProgress((p) => ({ ...p, [`create_${vi}`]: 0 }));
+        await uploadToS3WithProgress(presignedUrl, file, (pct) =>
+          setVideoProgress((p) => ({ ...p, [`create_${vi}`]: pct }))
+        );
+        videos.push(s3Key);
+      }
+      setVideoProgress({});
 
       const newBug = await bugsApi.create(projectId, {
         title: newBugTitle.trim(),
         description: newBugDesc.trim(),
         screenshots,
         documents,
+        videos,
       });
 
       setBugs((prev) => [{ ...newBug, reporterName: user?.name ?? "" }, ...prev]);
       setDialogOpen(false);
+      setNewBugVideoFiles([]);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to submit bug");
     } finally {
@@ -230,6 +312,8 @@ export default function ProjectDetailPage() {
     setEditStatus(bug.status);
     setEditScreenshots(bug.screenshots ?? []);
     setEditNewFiles([]);
+    setEditVideos(bug.videos ?? []);
+    setEditNewVideoFiles([]);
     setEditError("");
     setEditOpen(true);
   }
@@ -251,11 +335,28 @@ export default function ProjectDetailPage() {
         uploadedKeys.push(s3Key);
       }
 
+      const uploadedVideoKeys: string[] = [];
+      for (let vi = 0; vi < editNewVideoFiles.length; vi++) {
+        const file = editNewVideoFiles[vi];
+        const { presignedUrl, s3Key } = await attachmentsApi.presign({
+          filename: file.name,
+          contentType: file.type,
+          projectId,
+        });
+        setVideoProgress((p) => ({ ...p, [`edit_${vi}`]: 0 }));
+        await uploadToS3WithProgress(presignedUrl, file, (pct) =>
+          setVideoProgress((p) => ({ ...p, [`edit_${vi}`]: pct }))
+        );
+        uploadedVideoKeys.push(s3Key);
+      }
+      setVideoProgress({});
+
       const updated = await bugsApi.update(projectId, editBug.bugId, {
         title: editTitle.trim(),
         description: editDesc.trim(),
         status: editStatus !== editBug.status ? editStatus : undefined,
         screenshots: [...editScreenshots, ...uploadedKeys],
+        videos: [...editVideos, ...uploadedVideoKeys],
       });
       setBugs((prev) => prev.map((b) => b.bugId === updated.bugId ? updated : b));
       if (selectedBug?.bugId === updated.bugId) setSelectedBug(updated);
@@ -288,27 +389,75 @@ export default function ProjectDetailPage() {
     }
   }
 
-  // ── Screenshot lightbox ──────────────────────────────────────────────────
-  async function openLightbox(key: string) {
-    setLightboxKey(key);
+  // ── Screenshot lightbox (carousel) ──────────────────────────────────────
+  async function fetchLightboxUrl(key: string) {
+    if (lightboxUrlCache.current[key]) return lightboxUrlCache.current[key];
+    const result = await attachmentsApi.viewUrl(key);
+    lightboxUrlCache.current[key] = result;
+    return result;
+  }
+
+  async function openLightbox(screenshots: string[], index: number) {
+    setLightboxScreenshots(screenshots);
+    setLightboxIndex(index);
+    setLightboxOpen(true);
     setLightboxUrl(null);
     setLightboxLoading(true);
     try {
-      const { url, filename } = await attachmentsApi.viewUrl(key);
+      const { url, filename } = await fetchLightboxUrl(screenshots[index]);
       setLightboxUrl(url);
       setLightboxFilename(filename);
     } catch {
-      setLightboxKey(null);
+      setLightboxOpen(false);
     } finally {
       setLightboxLoading(false);
     }
   }
 
+  async function navigateLightbox(newIndex: number) {
+    if (newIndex < 0 || newIndex >= lightboxScreenshots.length) return;
+    setLightboxIndex(newIndex);
+    setLightboxLoading(true);
+    try {
+      const { url, filename } = await fetchLightboxUrl(lightboxScreenshots[newIndex]);
+      setLightboxUrl(url);
+      setLightboxFilename(filename);
+    } catch {} finally {
+      setLightboxLoading(false);
+    }
+  }
+
+  async function openVideoPlayer(key: string) {
+    setVideoPlayerLoading(key);
+    try {
+      const { url, filename } = await attachmentsApi.viewUrl(key, true);
+      setVideoPlayer({ url, filename });
+    } catch {
+      setReportError("Failed to load video");
+    } finally {
+      setVideoPlayerLoading(null);
+    }
+  }
+
   function closeLightbox() {
-    setLightboxKey(null);
+    setLightboxOpen(false);
+    setLightboxScreenshots([]);
     setLightboxUrl(null);
     setLightboxFilename("");
+    lightboxUrlCache.current = {};
   }
+
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "ArrowLeft") navigateLightbox(lightboxIndex - 1);
+      else if (e.key === "ArrowRight") navigateLightbox(lightboxIndex + 1);
+      else if (e.key === "Escape") closeLightbox();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lightboxOpen, lightboxIndex, lightboxScreenshots]);
 
   // ── Invite tester ────────────────────────────────────────────────────────
   async function handleInvite(e: React.FormEvent) {
@@ -327,17 +476,28 @@ export default function ProjectDetailPage() {
   }
 
   // ── Reports ──────────────────────────────────────────────────────────────
-  const totalReportCount = reports.length + stagedReports.length;
-  const reportsAtMax = totalReportCount >= 5;
-
   function handleReportFileAdd(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
-    setStagedReports((prev) => {
-      const combined = [...prev, ...files];
-      const remaining = 5 - reports.length;
-      return combined.slice(0, remaining);
-    });
+    setStagedReports((prev) => [...prev, ...files]);
     e.target.value = "";
+  }
+
+  async function handleViewReport(report: ProjectReport) {
+    setReportViewLoading(report.reportId);
+    try {
+      const ext = report.filename.split(".").pop()?.toLowerCase() ?? "";
+      if (ext === "md" || ext === "txt") {
+        const { content, filename } = await attachmentsApi.viewContent(report.s3Key);
+        setReportViewer({ url: "", filename, contentType: report.contentType, textContent: content });
+      } else {
+        const { url, filename } = await attachmentsApi.viewUrl(report.s3Key, true);
+        setReportViewer({ url, filename, contentType: report.contentType });
+      }
+    } catch {
+      setReportError("Failed to load report preview");
+    } finally {
+      setReportViewLoading(null);
+    }
   }
 
   function removeStagedReport(index: number) {
@@ -395,9 +555,9 @@ export default function ProjectDetailPage() {
   // ── Derive available statuses for edit dialog ────────────────────────────
   function getEditableStatuses(bug: Bug): BugStatus[] {
     if (role === "admin") return ALL_STATUSES;
-    // tester: current status + valid transitions from current
     const possible = TESTER_TRANSITIONS[bug.status] ?? [];
-    return [bug.status, ...possible];
+    const current = ALL_STATUSES.includes(bug.status) ? bug.status : ("Open" as BugStatus);
+    return [current, ...possible].filter((s, i, a) => a.indexOf(s) === i);
   }
 
   if (loading) {
@@ -418,17 +578,26 @@ export default function ProjectDetailPage() {
           </Link>
           <h1 className="text-2xl font-bold text-foreground">{project?.title ?? "Project"}</h1>
         </div>
-        {role === "admin" && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5 text-primary border-primary/30 hover:bg-primary/5"
-            onClick={() => setInviteOpen(true)}
+        <div className="flex items-center gap-2">
+          {role === "admin" && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 text-primary border-primary/30 hover:bg-primary/5"
+              onClick={() => setInviteOpen(true)}
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              Invite Tester
+            </Button>
+          )}
+          <button
+            onClick={() => setStatusInfoOpen(true)}
+            className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            title="Status guide"
           >
-            <UserPlus className="w-3.5 h-3.5" />
-            Invite Tester
-          </Button>
-        )}
+            <Info className="w-4 h-4" />
+          </button>
+        </div>
       </div>
       <div className="flex items-center justify-between mb-8">
         <p className="text-muted-foreground ml-7">{bugs.length} bug{bugs.length !== 1 ? "s" : ""}</p>
@@ -442,13 +611,38 @@ export default function ProjectDetailPage() {
       {error && <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg mb-4">{error}</p>}
 
       {/* Bugs table */}
-      <div className="border border-border rounded-xl overflow-x-auto bg-card">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/20">
-          <span className="text-sm font-medium text-muted-foreground">{bugs.length} bugs</span>
+      <div className="border border-border rounded-xl overflow-hidden bg-card">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/20 gap-2">
+          <div className="flex items-center gap-1 overflow-x-auto min-w-0">
+            {TAB_KEYS.map((tab) => {
+              const count = tabCount(tab);
+              const isActive = activeTab === tab;
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={cn(
+                    "shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap",
+                    isActive
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                  )}
+                >
+                  {tab}
+                  <span className={cn(
+                    "inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none min-w-[18px]",
+                    isActive ? "bg-white/25 text-primary-foreground" : "bg-muted text-muted-foreground"
+                  )}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
           <Button
             size="sm"
             onClick={openNewBug}
-            className={role === "tester" ? "bg-primary hover:bg-primary/90 gap-1.5" : "gap-1.5"}
+            className={cn("shrink-0", role === "tester" ? "bg-primary hover:bg-primary/90 gap-1.5" : "gap-1.5")}
             variant={role === "admin" ? "outline" : "default"}
           >
             <Plus className="w-3.5 h-3.5" />
@@ -456,6 +650,28 @@ export default function ProjectDetailPage() {
           </Button>
         </div>
 
+        <div className="px-3 py-2 border-b border-border">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search by title or description…"
+              value={bugSearch}
+              onChange={(e) => setBugSearch(e.target.value)}
+              className="w-full h-8 pl-8 pr-3 text-sm bg-muted/40 border border-border rounded-md placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-colors"
+            />
+            {bugSearch && (
+              <button
+                onClick={() => setBugSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/20">
@@ -468,60 +684,69 @@ export default function ProjectDetailPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {bugs.map((bug) => {
-              const isVerified = bug.status === "Verified";
+            {filteredBugs.map((bug) => {
+              const isClosed = bug.status === "Closed" || bug.status === "Invalid" || (bug.status as string) === "Verified";
               return (
               <TableRow
                 key={bug.bugId}
                 className="cursor-pointer hover:bg-muted/30 transition-colors"
                 onClick={() => openBug(bug)}
               >
-                <TableCell className={cn("pl-5 font-medium", isVerified ? "line-through text-muted-foreground" : "text-foreground")}>{bug.title}</TableCell>
-                <TableCell className={cn("text-sm", isVerified ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>{bug.reporterName ?? bug.reportedBy.slice(0, 8) + "…"}</TableCell>
-                <TableCell className={cn("text-sm", isVerified ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>
+                <TableCell className={cn("pl-5 font-medium", isClosed ? "line-through text-muted-foreground" : "text-foreground")}>{bug.title}</TableCell>
+                <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>{bug.reporterName ?? bug.reportedBy.slice(0, 8) + "…"}</TableCell>
+                <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>
                   {new Date(bug.createdAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
-                  {(bug.screenshots.length + bug.documents.length) > 0 ? (
-                    <div className={cn("flex items-center gap-1 text-sm", isVerified ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>
+                  {(bug.screenshots.length + bug.documents.length + (bug.videos?.length ?? 0)) > 0 ? (
+                    <div className={cn("flex items-center gap-1 text-sm", isClosed ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>
                       <Image className="w-3.5 h-3.5" />
-                      {bug.screenshots.length + bug.documents.length}
+                      {bug.screenshots.length + bug.documents.length + (bug.videos?.length ?? 0)}
                     </div>
                   ) : (
                     <span className="text-muted-foreground/40 text-sm">—</span>
                   )}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
-                  {transitions[bug.status].length > 0 ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        className={cn(
-                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
-                          STATUS_STYLES[bug.status]
-                        )}
-                      >
-                        {(() => { const Icon = STATUS_ICONS[bug.status]; return <Icon className="w-3 h-3" />; })()}
-                        {bug.status}
-                        <ChevronDown className="w-3 h-3 opacity-60" />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="w-40">
-                        {transitions[bug.status].map((s) => {
-                          const Icon = STATUS_ICONS[s];
-                          return (
-                            <DropdownMenuItem key={s} onClick={() => handleStatusChange(bug.bugId, s)} className="gap-2">
-                              <Icon className={cn("w-3.5 h-3.5 shrink-0", STATUS_ICON_COLORS[s])} />
-                              {s}
-                            </DropdownMenuItem>
-                          );
-                        })}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : (
-                    <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium", STATUS_STYLES[bug.status])}>
-                      {(() => { const Icon = STATUS_ICONS[bug.status]; return <Icon className="w-3 h-3" />; })()}
-                      {bug.status}
-                    </span>
-                  )}
+                  {(() => {
+                    const validTransitions = transitions[bug.status] ?? [];
+                    const dropdownStatuses = ALL_STATUSES.includes(bug.status as BugStatus)
+                      ? ALL_STATUSES
+                      : [bug.status as BugStatus, ...ALL_STATUSES];
+                    return (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          className={cn(
+                            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
+                            STATUS_STYLES[bug.status]
+                          )}
+                        >
+                          {(() => { const Icon = STATUS_ICONS[bug.status]; return <Icon className="w-3 h-3" />; })()}
+                          {bug.status}
+                          <ChevronDown className="w-3 h-3 opacity-60" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-44">
+                          {dropdownStatuses.map((s) => {
+                            const Icon = STATUS_ICONS[s];
+                            const isCurrent = s === bug.status;
+                            const isAllowed = validTransitions.includes(s);
+                            return (
+                              <DropdownMenuItem
+                                key={s}
+                                disabled={isCurrent || !isAllowed}
+                                onClick={() => isAllowed && handleStatusChange(bug.bugId, s)}
+                                className="gap-2"
+                              >
+                                <Icon className={cn("w-3.5 h-3.5 shrink-0", STATUS_ICON_COLORS[s])} />
+                                <span className={isCurrent ? "font-semibold" : ""}>{s}</span>
+                                {isCurrent && <Check className="w-3 h-3 ml-auto opacity-70" />}
+                              </DropdownMenuItem>
+                            );
+                          })}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    );
+                  })()}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-0.5">
@@ -551,16 +776,17 @@ export default function ProjectDetailPage() {
               </TableRow>
             );
           })}
-            {bugs.length === 0 && (
+            {filteredBugs.length === 0 && (
               <TableRow>
                 <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
-                  No bugs reported yet.
+                  {searchQuery ? `No bugs match "${bugSearch}".` : activeTab === "All" ? "No bugs reported yet." : `No ${activeTab.toLowerCase()} bugs.`}
                 </TableCell>
               </TableRow>
             )}
           </TableBody>
         </Table>
-      </div>
+        </div>{/* /overflow-x-auto */}
+      </div>{/* /card */}
 
       {/* Reports section */}
       <div className="mt-8 border border-border rounded-xl overflow-hidden bg-card">
@@ -568,27 +794,20 @@ export default function ProjectDetailPage() {
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-foreground">Overall Report</span>
             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground">
-              {reports.length}/5
+              {reports.length}
             </span>
           </div>
           <div className="relative">
             <label
-              className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer",
-                reportsAtMax
-                  ? "border-border text-muted-foreground/50 cursor-not-allowed bg-muted/20"
-                  : "border-border text-foreground hover:bg-muted/40"
-              )}
-              title={reportsAtMax ? "Max 5 files" : undefined}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer border-border text-foreground hover:bg-muted/40"
             >
               <Plus className="w-3.5 h-3.5" />
-              {reportsAtMax ? "Max 5" : "Add Files"}
+              Add Files
               <input
                 type="file"
                 multiple
                 accept={REPORT_ACCEPT}
                 className="hidden"
-                disabled={reportsAtMax}
                 onChange={handleReportFileAdd}
               />
             </label>
@@ -611,6 +830,16 @@ export default function ProjectDetailPage() {
                 </span>
               </div>
               <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => handleViewReport(report)}
+                  disabled={reportViewLoading === report.reportId}
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  title="View"
+                >
+                  {reportViewLoading === report.reportId
+                    ? <div className="w-3.5 h-3.5 rounded-full border-2 border-muted-foreground border-t-transparent animate-spin" />
+                    : <Eye className="w-3.5 h-3.5" />}
+                </button>
                 <button
                   onClick={() => handleDownloadReport(report.s3Key)}
                   className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
@@ -753,7 +982,7 @@ export default function ProjectDetailPage() {
                   value={newBugDesc} onChange={(e) => setNewBugDesc(e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Screenshots <span className="text-muted-foreground font-normal">(max 6, images only)</span></Label>
+                <Label>Screenshots <span className="text-muted-foreground font-normal">(max 10, images only)</span></Label>
                 <label className="flex items-center justify-center gap-2 w-full h-20 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors text-sm text-muted-foreground">
                   <Upload className="w-4 h-4" />
                   Click to upload screenshots
@@ -768,10 +997,10 @@ export default function ProjectDetailPage() {
                 {newBugFiles.length > 0 && (
                   <div className="space-y-1.5 mt-2">
                     {newBugFiles.map((file, i) => (
-                      <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-muted/40 text-sm">
-                        <div className="flex items-center gap-2 min-w-0">
+                      <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-muted/40 text-sm overflow-hidden">
+                        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
                           <Image className="w-4 h-4 text-primary shrink-0" />
-                          <span className="truncate">{file.name}</span>
+                          <span className="truncate">{trimName(file.name)}</span>
                         </div>
                         <button type="button" onClick={() => setNewBugFiles((prev) => prev.filter((_, j) => j !== i))}
                           className="text-muted-foreground hover:text-destructive shrink-0">
@@ -779,6 +1008,58 @@ export default function ProjectDetailPage() {
                         </button>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Videos <span className="text-muted-foreground font-normal">(max 5, up to 1 GB each)</span></Label>
+                <label className="flex items-center justify-center gap-2 w-full h-20 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors text-sm text-muted-foreground">
+                  <Video className="w-4 h-4" />
+                  Click to upload videos
+                  <input
+                    type="file"
+                    multiple
+                    accept="video/mp4,video/quicktime,video/webm,video/x-m4v,video/mpeg"
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      setNewBugVideoFiles((prev) => [...prev, ...files].slice(0, 5));
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                {newBugVideoFiles.length > 0 && (
+                  <div className="space-y-1.5 mt-2">
+                    {newBugVideoFiles.map((file, i) => {
+                      const pct = videoProgress[`create_${i}`];
+                      const uploading = pct !== undefined;
+                      return (
+                        <div key={i} className="px-3 py-2 rounded-lg bg-muted/40 text-sm space-y-1.5 overflow-hidden">
+                          <div className="flex items-center justify-between gap-2 overflow-hidden">
+                            <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                              <Video className="w-4 h-4 text-primary shrink-0" />
+                              <span className="truncate">{trimName(file.name)}</span>
+                            </div>
+                            {uploading ? (
+                              <span className="text-xs font-semibold text-primary shrink-0">{pct}%</span>
+                            ) : (
+                              <button type="button" onClick={() => setNewBugVideoFiles((prev) => prev.filter((_, j) => j !== i))}
+                                className="text-muted-foreground hover:text-destructive shrink-0">
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                          {uploading && (
+                            <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary rounded-full transition-all duration-150 ease-out"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -853,14 +1134,43 @@ export default function ProjectDetailPage() {
                       <button
                         key={i}
                         type="button"
-                        onClick={() => openLightbox(key)}
+                        onClick={() => openLightbox(selectedBug.screenshots, i)}
                         className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border text-sm text-foreground hover:bg-muted/30 hover:border-primary/30 transition-colors group"
                       >
                         <Image className="w-4 h-4 text-primary shrink-0" />
-                        <span className="truncate flex-1 text-left">{key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop()}</span>
+                        <span className="truncate flex-1 text-left">{trimName(key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop() || key)}</span>
                         <span className="text-xs font-semibold text-primary shrink-0 group-hover:underline">View</span>
                       </button>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Videos */}
+              {(selectedBug.videos ?? []).length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                    Videos ({(selectedBug.videos ?? []).length})
+                  </p>
+                  <div className="space-y-1.5">
+                    {(selectedBug.videos ?? []).map((key, i) => {
+                      const filename = key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop() || key;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => openVideoPlayer(key)}
+                          disabled={videoPlayerLoading === key}
+                          className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border text-sm text-foreground hover:bg-muted/30 hover:border-primary/30 transition-colors group"
+                        >
+                          {videoPlayerLoading === key
+                            ? <div className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin shrink-0" />
+                            : <Video className="w-4 h-4 text-primary shrink-0" />}
+                          <span className="truncate flex-1 text-left">{trimName(filename)}</span>
+                          <span className="text-xs font-semibold text-primary shrink-0 group-hover:underline">Play</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -874,8 +1184,8 @@ export default function ProjectDetailPage() {
                   <div className="space-y-1.5">
                     {selectedBug.documents.map((key, i) => (
                       <div key={i} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border text-sm text-foreground">
-                        <FileText className="w-4 h-4 text-muted-foreground" />
-                        {key.split("/").pop()}
+                        <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                        <span className="truncate">{trimName(key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop() || key)}</span>
                       </div>
                     ))}
                   </div>
@@ -923,12 +1233,7 @@ export default function ProjectDetailPage() {
                       onClick={() => setEditStatus(s)}
                       className={cn(
                         "px-3 py-1 rounded-full text-xs font-semibold border transition-colors",
-                        editStatus === s
-                          ? s === "Open" && "bg-blue-100 text-blue-700 border-blue-300"
-                            || s === "Fixed" && "bg-green-100 text-green-700 border-green-300"
-                            || s === "Verified" && "bg-purple-100 text-purple-700 border-purple-300"
-                            || "bg-red-100 text-red-700 border-red-300"
-                          : "border-border text-muted-foreground hover:bg-muted/50"
+                        editStatus === s ? STATUS_STYLES[s] : "border-border text-muted-foreground hover:bg-muted/50"
                       )}
                     >
                       {s}
@@ -941,11 +1246,11 @@ export default function ProjectDetailPage() {
                 {editScreenshots.length > 0 && (
                   <div className="space-y-1.5">
                     {editScreenshots.map((key, i) => (
-                      <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-muted/40 text-sm">
+                      <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-muted/40 text-sm overflow-hidden">
                         <div className="flex items-center gap-2 min-w-0">
                           <Image className="w-4 h-4 text-primary shrink-0" />
                           <span className="truncate text-sm">
-                            {key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop()}
+                            {trimName(key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop() || key)}
                           </span>
                         </div>
                         <button
@@ -981,7 +1286,7 @@ export default function ProjectDetailPage() {
                       <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-dashed border-primary/30 text-sm">
                         <div className="flex items-center gap-2 min-w-0">
                           <Image className="w-4 h-4 text-primary shrink-0" />
-                          <span className="truncate">{file.name}</span>
+                          <span className="truncate">{trimName(file.name)}</span>
                           <span className="text-xs text-muted-foreground shrink-0">New</span>
                         </div>
                         <button
@@ -993,6 +1298,83 @@ export default function ProjectDetailPage() {
                         </button>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Videos</Label>
+                {editVideos.length > 0 && (
+                  <div className="space-y-1.5">
+                    {editVideos.map((key, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-muted/40 text-sm overflow-hidden">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Video className="w-4 h-4 text-primary shrink-0" />
+                          <span className="truncate text-sm">
+                            {trimName(key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop() || key)}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEditVideos((prev) => prev.filter((_, j) => j !== i))}
+                          className="text-muted-foreground hover:text-destructive shrink-0"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <label className="flex items-center justify-center gap-2 w-full h-16 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors text-sm text-muted-foreground">
+                  <Video className="w-4 h-4" />
+                  Upload new videos
+                  <input
+                    type="file"
+                    multiple
+                    accept="video/mp4,video/quicktime,video/webm,video/x-m4v,video/mpeg"
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      setEditNewVideoFiles((prev) => [...prev, ...files].slice(0, Math.max(0, 5 - editVideos.length)));
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                {editNewVideoFiles.length > 0 && (
+                  <div className="space-y-1.5">
+                    {editNewVideoFiles.map((file, i) => {
+                      const pct = videoProgress[`edit_${i}`];
+                      const uploading = pct !== undefined;
+                      return (
+                        <div key={i} className="px-3 py-2 rounded-lg bg-primary/5 border border-dashed border-primary/30 text-sm space-y-1.5 overflow-hidden">
+                          <div className="flex items-center justify-between gap-2 overflow-hidden">
+                            <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                              <Video className="w-4 h-4 text-primary shrink-0" />
+                              <span className="truncate">{trimName(file.name)}</span>
+                              {!uploading && <span className="text-xs text-muted-foreground shrink-0">New</span>}
+                            </div>
+                            {uploading ? (
+                              <span className="text-xs font-semibold text-primary shrink-0">{pct}%</span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setEditNewVideoFiles((prev) => prev.filter((_, j) => j !== i))}
+                                className="text-muted-foreground hover:text-destructive shrink-0"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                          {uploading && (
+                            <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary rounded-full transition-all duration-150 ease-out"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1044,19 +1426,216 @@ export default function ProjectDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Screenshot Lightbox */}
-      {lightboxKey && (
+      {/* Status Guide Dialog */}
+      <Dialog open={statusInfoOpen} onOpenChange={setStatusInfoOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Info className="w-4 h-4 text-muted-foreground" />
+              Bug Status Guide
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-2">
+            {[
+              {
+                status: "Open" as BugStatus,
+                who: "Tester",
+                desc: "Tester has reported a bug that hasn't been fixed yet. The developer needs to investigate.",
+              },
+              {
+                status: "Fixed" as BugStatus,
+                who: "Developer",
+                desc: "Developer has fixed the bug and is asking the tester to verify the fix.",
+              },
+              {
+                status: "Closed" as BugStatus,
+                who: "Tester",
+                desc: "Tester has verified the fix and confirmed the bug is fully resolved.",
+              },
+              {
+                status: "Invalid" as BugStatus,
+                who: "Developer",
+                desc: "Developer has determined this is not a valid bug — cannot reproduce, out of scope, or working as intended.",
+              },
+            ].map(({ status, who, desc }) => {
+              const Icon = STATUS_ICONS[status] as React.FC<{ className?: string }>;
+              return (
+                <div key={status} className="flex items-start gap-3 p-3 rounded-lg border border-border">
+                  <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 mt-0.5", STATUS_STYLES[status])}>
+                    <Icon className="w-3 h-3" />
+                    {status}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-muted-foreground mb-0.5">Set by {who}</p>
+                    <p className="text-sm text-foreground leading-snug">{desc}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Report Viewer */}
+      {reportViewer && createPortal(
         <div
-          className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/90"
+          className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setReportViewer(null)}
+        >
+          <div
+            className="bg-background rounded-xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                <span className="font-semibold text-sm text-foreground truncate">{reportViewer.filename}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={reportViewer.url}
+                  download={reportViewer.filename}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-border text-foreground hover:bg-muted/40 transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download
+                </a>
+                <button
+                  onClick={() => setReportViewer(null)}
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 overflow-auto">
+              {reportViewer.textContent !== undefined ? (
+                (() => {
+                  const isMd = reportViewer.filename.toLowerCase().endsWith(".md");
+                  return isMd ? (
+                    <div className="max-w-4xl mx-auto px-8 py-6 text-sm leading-7 text-foreground">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          h1: ({ children }) => <h1 className="text-2xl font-bold mt-6 mb-4 pb-2 border-b border-border">{children}</h1>,
+                          h2: ({ children }) => <h2 className="text-xl font-bold mt-6 mb-3 pb-2 border-b border-border">{children}</h2>,
+                          h3: ({ children }) => <h3 className="text-lg font-semibold mt-5 mb-2">{children}</h3>,
+                          h4: ({ children }) => <h4 className="text-base font-semibold mt-4 mb-2">{children}</h4>,
+                          p: ({ children }) => <p className="mb-4">{children}</p>,
+                          pre: ({ children }) => <pre className="bg-muted rounded-lg p-4 overflow-x-auto mb-4 text-xs font-mono">{children}</pre>,
+                          code: ({ className, children }) => className
+                            ? <code className={cn("font-mono text-xs", className)}>{children}</code>
+                            : <code className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>,
+                          ul: ({ children }) => <ul className="mb-4 ml-5 list-disc space-y-1">{children}</ul>,
+                          ol: ({ children }) => <ol className="mb-4 ml-5 list-decimal space-y-1">{children}</ol>,
+                          li: ({ children }) => <li className="leading-7">{children}</li>,
+                          blockquote: ({ children }) => <blockquote className="border-l-4 border-border pl-4 text-muted-foreground my-4">{children}</blockquote>,
+                          a: ({ href, children }) => <a href={href} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">{children}</a>,
+                          table: ({ children }) => <div className="overflow-x-auto mb-4"><table className="w-full border-collapse border border-border text-sm">{children}</table></div>,
+                          thead: ({ children }) => <thead className="bg-muted">{children}</thead>,
+                          tr: ({ children }) => <tr className="border-b border-border">{children}</tr>,
+                          th: ({ children }) => <th className="px-3 py-2 text-left font-semibold border-r border-border last:border-r-0">{children}</th>,
+                          td: ({ children }) => <td className="px-3 py-2 border-r border-border last:border-r-0">{children}</td>,
+                          hr: () => <hr className="my-6 border-border" />,
+                          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                          em: ({ children }) => <em className="italic">{children}</em>,
+                        }}
+                      >
+                        {reportViewer.textContent}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <pre className="p-6 text-sm font-mono text-foreground whitespace-pre-wrap break-words">{reportViewer.textContent}</pre>
+                  );
+                })()
+              ) : reportViewer.contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? (
+                <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
+                  <FileText className="w-12 h-12 opacity-30" />
+                  <p className="text-sm">Preview not available for .docx files.</p>
+                  <a
+                    href={reportViewer.url}
+                    download={reportViewer.filename}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download to view
+                  </a>
+                </div>
+              ) : (
+                <iframe
+                  src={reportViewer.url}
+                  title={reportViewer.filename}
+                  className="w-full h-full border-0"
+                />
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Video Player */}
+      {videoPlayer && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] bg-black/90 flex flex-col items-center justify-center p-4"
+          onClick={() => setVideoPlayer(null)}
+        >
+          <button
+            onClick={() => setVideoPlayer(null)}
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <div
+            className="flex flex-col items-center gap-3 w-full max-w-4xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-white/70 text-sm">{videoPlayer.filename}</p>
+            <video
+              src={videoPlayer.url}
+              controls
+              autoPlay
+              className="max-w-full max-h-[80vh] rounded-lg shadow-2xl"
+            />
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Screenshot Lightbox (carousel) — portal to escape stacking context */}
+      {lightboxOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/90"
           onClick={closeLightbox}
         >
-          {/* Close button */}
+          {/* Close */}
           <button
             onClick={closeLightbox}
             className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
           >
             <X className="w-5 h-5" />
           </button>
+
+          {/* Prev */}
+          {lightboxScreenshots.length > 1 && lightboxIndex > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); navigateLightbox(lightboxIndex - 1); }}
+              className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+          )}
+
+          {/* Next */}
+          {lightboxScreenshots.length > 1 && lightboxIndex < lightboxScreenshots.length - 1 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); navigateLightbox(lightboxIndex + 1); }}
+              className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
+            >
+              <ChevronRight className="w-6 h-6" />
+            </button>
+          )}
 
           {/* Image area */}
           <div
@@ -1075,9 +1654,12 @@ export default function ProjectDetailPage() {
             ) : null}
           </div>
 
-          {/* Download button */}
-          {lightboxUrl && (
-            <div className="absolute bottom-6 flex items-center gap-3">
+          {/* Counter + Download */}
+          <div className="absolute bottom-6 flex items-center gap-4">
+            {lightboxScreenshots.length > 1 && (
+              <span className="text-white/60 text-sm">{lightboxIndex + 1} / {lightboxScreenshots.length}</span>
+            )}
+            {lightboxUrl && (
               <a
                 href={lightboxUrl}
                 download={lightboxFilename}
@@ -1089,9 +1671,10 @@ export default function ProjectDetailPage() {
                 <Download className="w-4 h-4" />
                 Download
               </a>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

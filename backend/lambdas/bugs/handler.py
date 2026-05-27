@@ -15,10 +15,27 @@ NOTIFICATIONS_FN_ARN = os.environ.get("NOTIFICATIONS_FN_ARN", "")
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
 table = dynamodb.Table(TABLE_NAME)
 
-_ALL = ["Open", "Fixed", "Verified", "Reopen"]
+_ALL = ["Open", "Fixed", "Closed", "Invalid"]
+
 VALID_TRANSITIONS = {
-    role: {s: [t for t in _ALL if t != s] for s in _ALL}
-    for role in ("admin", "tester")
+    "admin": {
+        "Open":    ["Fixed", "Invalid"],
+        "Fixed":   ["Invalid", "Open"],
+        "Closed":  ["Open", "Fixed"],
+        "Invalid": ["Open"],
+        # legacy statuses in existing data
+        "Verified": ["Open", "Fixed"],
+        "Reopen":   ["Fixed", "Invalid"],
+    },
+    "tester": {
+        "Open":    [],
+        "Fixed":   ["Closed", "Open"],
+        "Closed":  ["Open"],
+        "Invalid": [],
+        # legacy
+        "Verified": ["Open"],
+        "Reopen":   ["Closed"],
+    },
 }
 
 
@@ -92,8 +109,9 @@ def create_bug(event: dict, project_id: str, user_sub: str, user_role: str) -> d
     body = json.loads(event.get("body") or "{}")
     title = body.get("title", "").strip()
     description = body.get("description", "").strip()
-    screenshots = body.get("screenshots", [])[:3]
+    screenshots = body.get("screenshots", [])[:10]
     documents = body.get("documents", [])[:3]
+    videos = body.get("videos", [])[:5]
 
     if not title:
         return response(400, {"error": "title is required"})
@@ -110,6 +128,7 @@ def create_bug(event: dict, project_id: str, user_sub: str, user_role: str) -> d
         "description": description,
         "screenshots": screenshots,
         "documents": documents,
+        "videos": videos,
         "status": "Open",
         "reportedBy": user_sub,
         "createdAt": now,
@@ -184,6 +203,20 @@ def update_bug(event: dict, project_id: str, bug_id: str, user_sub: str, user_ro
         expr_values[":sc"] = new_screenshots
         update_parts.append("screenshots = :sc")
 
+    new_videos = None
+    if "videos" in body:
+        new_videos = body["videos"]
+        old_videos = bug.get("videos", [])
+        removed_video_keys = [k for k in old_videos if k not in new_videos]
+        for key in removed_video_keys:
+            if BUCKET_NAME and key:
+                try:
+                    s3.delete_object(Bucket=BUCKET_NAME, Key=key)
+                except Exception:
+                    pass
+        expr_values[":vd"] = new_videos
+        update_parts.append("videos = :vd")
+
     update_kwargs = {
         "Key": {"PK": f"PROJECT#{project_id}", "SK": f"BUG#{bug_id}"},
         "UpdateExpression": "SET " + ", ".join(update_parts),
@@ -215,6 +248,8 @@ def update_bug(event: dict, project_id: str, bug_id: str, user_sub: str, user_ro
     updated = {**bug, "title": title, "description": description, "status": new_status, "updatedAt": now}
     if new_screenshots is not None:
         updated["screenshots"] = new_screenshots
+    if new_videos is not None:
+        updated["videos"] = new_videos
     return response(200, updated)
 
 

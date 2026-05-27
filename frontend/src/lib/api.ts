@@ -97,8 +97,14 @@ export const attachmentsApi = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  viewUrl: (key: string) =>
-    request<{ url: string; filename: string }>(`/attachments/view?key=${encodeURIComponent(key)}`),
+  viewUrl: (key: string, inline = false) =>
+    request<{ url: string; filename: string }>(
+      `/attachments/view?key=${encodeURIComponent(key)}${inline ? "&inline=true" : ""}`
+    ),
+  viewContent: (key: string) =>
+    request<{ content: string; filename: string }>(
+      `/attachments/view?key=${encodeURIComponent(key)}&content=true`
+    ),
 };
 
 export async function uploadToS3(presignedUrl: string, file: File): Promise<void> {
@@ -108,6 +114,24 @@ export async function uploadToS3(presignedUrl: string, file: File): Promise<void
     headers: { "Content-Type": file.type },
   });
   if (!res.ok) throw new Error("S3 upload failed");
+}
+
+export function uploadToS3WithProgress(
+  presignedUrl: string,
+  file: File,
+  onProgress: (pct: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", presignedUrl);
+    xhr.setRequestHeader("Content-Type", file.type);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("S3 upload failed")));
+    xhr.onerror = () => reject(new Error("S3 upload failed"));
+    xhr.send(file);
+  });
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -143,7 +167,7 @@ export const usersApi = {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type BugStatus = "Open" | "Fixed" | "Verified" | "Reopen";
+export type BugStatus = "Open" | "Fixed" | "Closed" | "Invalid";
 
 export interface Project {
   projectId: string;
@@ -160,6 +184,7 @@ export interface Bug {
   title: string;
   description: string;
   screenshots: string[];
+  videos?: string[];
   documents: string[];
   status: BugStatus;
   reportedBy: string;
@@ -173,6 +198,7 @@ export interface CreateBugPayload {
   description: string;
   screenshots: string[];
   documents: string[];
+  videos: string[];
 }
 
 export interface UpdateBugPayload {
@@ -180,6 +206,7 @@ export interface UpdateBugPayload {
   description?: string;
   status?: BugStatus;
   screenshots?: string[];
+  videos?: string[];
 }
 
 export interface PresignPayload {

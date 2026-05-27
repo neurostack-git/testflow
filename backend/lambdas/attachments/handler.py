@@ -16,6 +16,11 @@ ALLOWED_UPLOAD_TYPES = {
     "text/plain": "documents",
     "application/pdf": "documents",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "documents",
+    "video/mp4": "videos",
+    "video/quicktime": "videos",
+    "video/webm": "videos",
+    "video/x-m4v": "videos",
+    "video/mpeg": "videos",
 }
 
 
@@ -59,7 +64,7 @@ def generate_presigned_url(event: dict) -> dict:
     presigned_url = s3.generate_presigned_url(
         "put_object",
         Params={"Bucket": BUCKET_NAME, "Key": s3_key, "ContentType": content_type},
-        ExpiresIn=300,
+        ExpiresIn=3600,
     )
 
     return response(200, {"presignedUrl": presigned_url, "s3Key": s3_key})
@@ -68,22 +73,44 @@ def generate_presigned_url(event: dict) -> dict:
 def get_view_url(event: dict) -> dict:
     params = event.get("queryStringParameters") or {}
     key = params.get("key", "").strip()
+    inline = params.get("inline", "false").lower() == "true"
+    content = params.get("content", "false").lower() == "true"
 
     if not key:
         return response(400, {"error": "key is required"})
 
     filename = key.split("/")[-1]
-    # split off the uuid_ prefix from filename
     if "_" in filename:
         filename = filename.split("_", 1)[1]
 
+    # Return file text content directly (bypasses S3 CORS restriction)
+    if content:
+        try:
+            obj = s3.get_object(Bucket=BUCKET_NAME, Key=key)
+            text = obj["Body"].read().decode("utf-8")
+            return response(200, {"content": text, "filename": filename})
+        except Exception:
+            return response(500, {"error": "Failed to read file content"})
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    presign_params: dict = {"Bucket": BUCKET_NAME, "Key": key}
+
+    if inline:
+        if ext in ("pdf", "png", "jpg", "jpeg", "webp", "gif", "txt"):
+            presign_params["ResponseContentDisposition"] = f'inline; filename="{filename}"'
+        elif ext == "md":
+            presign_params["ResponseContentDisposition"] = f'inline; filename="{filename}"'
+            presign_params["ResponseContentType"] = "text/plain; charset=utf-8"
+        else:
+            # docx — browsers can't render it inline regardless
+            presign_params["ResponseContentDisposition"] = f'attachment; filename="{filename}"'
+    else:
+        presign_params["ResponseContentDisposition"] = f'attachment; filename="{filename}"'
+
     presigned_url = s3.generate_presigned_url(
         "get_object",
-        Params={
-            "Bucket": BUCKET_NAME,
-            "Key": key,
-            "ResponseContentDisposition": f'attachment; filename="{filename}"',
-        },
+        Params=presign_params,
         ExpiresIn=3600,
     )
 
