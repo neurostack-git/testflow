@@ -71,17 +71,21 @@ export default function DashboardPage() {
     );
   }
 
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
   return (
     <div className="p-4 sm:p-8">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+          <p className="text-xs font-semibold uppercase tracking-widest text-primary/70 mb-1">{greeting}</p>
+          <h1 className="text-2xl font-bold text-foreground">{user?.name?.split(" ")[0] ?? "Dashboard"}</h1>
           <p className="text-muted-foreground mt-0.5">
             {projects.length} project{projects.length !== 1 ? "s" : ""}
           </p>
         </div>
         {role === "admin" && (
-          <Button onClick={() => setOpen(true)} className="bg-primary hover:bg-primary/90 gap-2">
+          <Button onClick={() => setOpen(true)} className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-sm shadow-primary/20 gap-2">
             <Plus className="w-4 h-4" />
             New Project
           </Button>
@@ -115,9 +119,9 @@ export default function DashboardPage() {
           {projects.map((project) => (
             <div key={project.projectId} className="relative group">
               <Link href={`/projects/${project.projectId}`} className="block">
-                <Card className="p-5 hover:shadow-md hover:border-primary/30 transition-all cursor-pointer">
+                <Card className="p-5 hover:shadow-lg hover:shadow-primary/8 hover:-translate-y-0.5 hover:border-primary/25 transition-all duration-200 cursor-pointer bg-card/80 backdrop-blur-sm">
                   <div className="mb-4">
-                    <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center group-hover:bg-primary/15 transition-colors">
+                    <div className="w-10 h-10 bg-gradient-to-br from-primary/20 to-primary/5 rounded-xl flex items-center justify-center group-hover:from-primary/30 group-hover:to-primary/10 transition-all duration-200">
                       <Bug className="w-5 h-5 text-primary" />
                     </div>
                   </div>

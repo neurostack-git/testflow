@@ -28,7 +28,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!user) return null;
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex min-h-screen bg-background tf-dot-bg">
       {/* Mobile backdrop */}
       {sidebarOpen && (
         <div
@@ -59,7 +59,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <span className="font-bold text-foreground tracking-tight">TestFlow</span>
         </header>
 
-        <main className="flex-1 overflow-auto min-w-0">{children}</main>
+        <main className="flex-1 overflow-auto min-w-0 tf-page-in">{children}</main>
       </div>
     </div>
   );

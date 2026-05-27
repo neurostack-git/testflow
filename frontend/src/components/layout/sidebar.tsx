@@ -60,11 +60,8 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
     <aside
       className={cn(
         "flex flex-col border-r border-border bg-sidebar h-screen w-60 shrink-0",
-        // Mobile: fixed overlay drawer with slide animation
         "fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out",
-        // Desktop: sticky in normal flow, always visible
         "lg:sticky lg:top-0 lg:z-auto lg:translate-x-0",
-        // Mobile open/closed
         open ? "translate-x-0 shadow-2xl" : "-translate-x-full"
       )}
     >
@@ -90,9 +87,9 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
             key={href}
             href={href}
             className={cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150",
               pathname === href || pathname.startsWith(href + "/")
-                ? "bg-primary text-white"
+                ? "bg-gradient-to-r from-primary to-primary/80 text-white shadow-sm shadow-primary/25"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             )}
           >
@@ -116,9 +113,9 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
         <Link
           href="/bin"
           className={cn(
-            "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+            "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150",
             pathname === "/bin"
-              ? "bg-primary text-white"
+              ? "bg-gradient-to-r from-primary to-primary/80 text-white shadow-sm shadow-primary/25"
               : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           )}
         >
