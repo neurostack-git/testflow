@@ -73,7 +73,7 @@ export default function ProfilePage() {
                   <p className="text-sm text-muted-foreground truncate">{user.email}</p>
                 </div>
               </div>
-              <div className="sm:pb-1 flex flex-col items-start sm:items-end gap-1.5">
+              <div className="sm:pb-1">
                 <span className={cn(
                   "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border",
                   user.role === "admin"
@@ -83,13 +83,15 @@ export default function ProfilePage() {
                   <Shield className="w-3 h-3" />
                   <span className="capitalize">{user.role}</span>
                 </span>
-                {user.role === "tester" && adminName && (
-                  <span className="text-xs text-muted-foreground">
-                    Developer: <span className="font-medium text-foreground">{adminName}</span>
-                  </span>
-                )}
               </div>
             </div>
+            {user.role === "tester" && adminName && (
+              <div className="flex justify-end mt-3">
+                <p className="text-xs text-muted-foreground">
+                  Developer: <span className="font-medium text-foreground">{adminName}</span>
+                </p>
+              </div>
+            )}
           </div>
         </Card>
 
