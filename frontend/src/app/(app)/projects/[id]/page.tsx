@@ -35,8 +35,8 @@ const STATUS_STYLES: Record<string, string> = {
   Fixed:    "bg-green-100 text-green-700 hover:bg-green-200",
   Closed:   "bg-purple-100 text-purple-700 hover:bg-purple-200",
   Invalid:  "bg-gray-100 text-gray-600 hover:bg-gray-200",
-  Verified: "bg-purple-100 text-purple-700 hover:bg-purple-200",
-  Reopen:   "bg-blue-100 text-blue-700 hover:bg-blue-200",
+  Verified: "bg-purple-100 text-purple-700 hover:bg-purple-200", // legacy alias
+  Reopen:   "bg-blue-100 text-blue-700 hover:bg-blue-200",       // legacy alias
 };
 
 const ALL_STATUSES: BugStatus[] = ["Open", "Fixed", "Closed", "Invalid"];
@@ -46,8 +46,8 @@ const STATUS_ICONS: Record<string, React.FC<{ className?: string }>> = {
   Fixed:    CheckCircle2,
   Closed:   BadgeCheck,
   Invalid:  Ban,
-  Verified: BadgeCheck,
-  Reopen:   CircleDot,
+  Verified: BadgeCheck, // legacy alias
+  Reopen:   CircleDot,  // legacy alias
 };
 
 const STATUS_ICON_COLORS: Record<string, string> = {
@@ -55,8 +55,8 @@ const STATUS_ICON_COLORS: Record<string, string> = {
   Fixed:    "text-green-600",
   Closed:   "text-purple-600",
   Invalid:  "text-gray-500",
-  Verified: "text-purple-600",
-  Reopen:   "text-blue-600",
+  Verified: "text-purple-600", // legacy alias
+  Reopen:   "text-blue-600",   // legacy alias
 };
 
 const ADMIN_TRANSITIONS: Record<string, BugStatus[]> = {
@@ -64,8 +64,8 @@ const ADMIN_TRANSITIONS: Record<string, BugStatus[]> = {
   Fixed:    ["Invalid", "Open"],
   Closed:   ["Open", "Fixed"],
   Invalid:  ["Open"],
-  Verified: ["Open", "Fixed"],
-  Reopen:   ["Fixed", "Invalid"],
+  Verified: ["Open", "Fixed"],   // legacy alias
+  Reopen:   ["Fixed", "Invalid"], // legacy alias
 };
 
 const TESTER_TRANSITIONS: Record<string, BugStatus[]> = {
@@ -73,8 +73,8 @@ const TESTER_TRANSITIONS: Record<string, BugStatus[]> = {
   Fixed:    ["Closed", "Open"],
   Closed:   ["Open"],
   Invalid:  [],
-  Verified: ["Open"],
-  Reopen:   ["Closed"],
+  Verified: ["Open"],    // legacy alias
+  Reopen:   ["Closed"],  // legacy alias
 };
 
 const REPORT_ACCEPT = ".md,.txt,.pdf,.docx,text/markdown,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
