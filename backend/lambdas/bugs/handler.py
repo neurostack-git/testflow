@@ -274,8 +274,5 @@ def delete_bug(project_id: str, bug_id: str, user_sub: str, user_role: str) -> d
     if not bug:
         return response(404, {"error": "Bug not found"})
 
-    if user_role == "tester" and bug.get("reportedBy") != user_sub:
-        return response(403, {"error": "Forbidden"})
-
     table.delete_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"BUG#{bug_id}"})
     return response(200, {"message": "Bug deleted"})
