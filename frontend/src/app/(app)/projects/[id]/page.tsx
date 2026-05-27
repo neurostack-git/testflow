@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  ArrowLeft, Plus, ChevronDown, Paperclip, FileText, Image, X, Upload,
+  ArrowLeft, Plus, ChevronDown, FileText, Image, X, Upload,
   UserPlus, Pencil, Download, Trash2, Eye,
   CircleDot, CheckCircle2, BadgeCheck, RotateCcw,
 } from "lucide-react";
@@ -441,29 +441,31 @@ export default function ProjectDetailPage() {
           <TableHeader>
             <TableRow className="bg-muted/20">
               <TableHead className="pl-5">Bug Title</TableHead>
-              <TableHead>Reporter</TableHead>
+              <TableHead>Tester</TableHead>
               <TableHead>Date</TableHead>
-              <TableHead>Attachments</TableHead>
+              <TableHead>Screenshots</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {bugs.map((bug) => (
+            {bugs.map((bug) => {
+              const isVerified = bug.status === "Verified";
+              return (
               <TableRow
                 key={bug.bugId}
                 className="cursor-pointer hover:bg-muted/30 transition-colors"
                 onClick={() => openBug(bug)}
               >
-                <TableCell className={cn("pl-5 font-medium", bug.status === "Fixed" ? "line-through text-muted-foreground" : "text-foreground")}>{bug.title}</TableCell>
-                <TableCell className="text-muted-foreground text-sm">{bug.reporterName ?? bug.reportedBy.slice(0, 8) + "…"}</TableCell>
-                <TableCell className="text-muted-foreground text-sm">
+                <TableCell className={cn("pl-5 font-medium", isVerified ? "line-through text-muted-foreground" : "text-foreground")}>{bug.title}</TableCell>
+                <TableCell className={cn("text-sm", isVerified ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>{bug.reporterName ?? bug.reportedBy.slice(0, 8) + "…"}</TableCell>
+                <TableCell className={cn("text-sm", isVerified ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>
                   {new Date(bug.createdAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   {(bug.screenshots.length + bug.documents.length) > 0 ? (
-                    <div className="flex items-center gap-1 text-muted-foreground text-sm">
-                      <Paperclip className="w-3.5 h-3.5" />
+                    <div className={cn("flex items-center gap-1 text-sm", isVerified ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>
+                      <Image className="w-3.5 h-3.5" />
                       {bug.screenshots.length + bug.documents.length}
                     </div>
                   ) : (
@@ -528,7 +530,8 @@ export default function ProjectDetailPage() {
                   </div>
                 </TableCell>
               </TableRow>
-            ))}
+            );
+          })}
             {bugs.length === 0 && (
               <TableRow>
                 <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
