@@ -15,7 +15,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   ArrowLeft, Plus, ChevronDown, FileText, Image, X, Upload,
-  UserPlus, Pencil, Download, Trash2, Eye,
+  UserPlus, Pencil, Download, Trash2, Eye, AlertTriangle,
   CircleDot, CheckCircle2, BadgeCheck, RotateCcw,
 } from "lucide-react";
 import Link from "next/link";
@@ -91,6 +91,10 @@ export default function ProjectDetailPage() {
   const [newBugDesc, setNewBugDesc] = useState("");
   const [newBugFiles, setNewBugFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Delete bug confirm dialog
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; bug: Bug | null }>({ open: false, bug: null });
+  const [deleting, setDeleting] = useState(false);
 
   // Edit bug dialog
   const [editBug, setEditBug] = useState<Bug | null>(null);
@@ -264,15 +268,23 @@ export default function ProjectDetailPage() {
   }
 
   // ── Delete bug ───────────────────────────────────────────────────────────
-  async function handleDeleteBug(e: React.MouseEvent, bug: Bug) {
+  function handleDeleteBug(e: React.MouseEvent, bug: Bug) {
     e.stopPropagation();
-    if (!confirm(`Delete "${bug.title}"? This cannot be undone.`)) return;
+    setDeleteConfirm({ open: true, bug });
+  }
+
+  async function confirmDeleteBug() {
+    if (!deleteConfirm.bug) return;
+    setDeleting(true);
     try {
-      await bugsApi.delete(projectId, bug.bugId);
-      setBugs((prev) => prev.filter((b) => b.bugId !== bug.bugId));
-      if (selectedBug?.bugId === bug.bugId) setDialogOpen(false);
+      await bugsApi.delete(projectId, deleteConfirm.bug.bugId);
+      setBugs((prev) => prev.filter((b) => b.bugId !== deleteConfirm.bug!.bugId));
+      if (selectedBug?.bugId === deleteConfirm.bug.bugId) setDialogOpen(false);
+      setDeleteConfirm({ open: false, bug: null });
     } catch {
       setError("Failed to delete bug");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -981,6 +993,42 @@ export default function ProjectDetailPage() {
               </div>
             </form>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Bug Confirmation Dialog */}
+      <Dialog open={deleteConfirm.open} onOpenChange={(o) => !deleting && setDeleteConfirm({ open: o, bug: o ? deleteConfirm.bug : null })}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete bug?</DialogTitle>
+          </DialogHeader>
+          <div className="mt-1 space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-destructive/10 rounded-xl flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-destructive" />
+              </div>
+              <div>
+                <p className="font-semibold text-foreground text-sm">{deleteConfirm.bug?.title}</p>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  This bug and all its screenshots will be permanently deleted. This cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setDeleteConfirm({ open: false, bug: null })} disabled={deleting}>
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                className="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                onClick={confirmDeleteBug}
+                disabled={deleting}
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                {deleting ? "Deleting…" : "Delete"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
