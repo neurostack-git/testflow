@@ -32,6 +32,11 @@ export default function AdminPage() {
     try {
       const res = await projectsApi.listMembers(projectId);
       setMembers((prev) => ({ ...prev, [projectId]: res.members }));
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.projectId === projectId ? { ...p, testerCount: res.members.length } : p
+        )
+      );
     } finally {
       setLoadingMembers((prev) => ({ ...prev, [projectId]: false }));
     }
