@@ -62,7 +62,7 @@ export default function ProfilePage() {
         {/* Avatar + identity card */}
         <Card className="mb-5 overflow-hidden">
           <div className="h-20 bg-gradient-to-br from-primary/20 via-primary/10 to-transparent" />
-          <div className="px-6 pb-6 -mt-8">
+          <div className="px-6 pb-5 -mt-8">
             <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
               <div className="flex items-end gap-4">
                 <div className="w-16 h-16 rounded-2xl bg-primary/15 border-4 border-background flex items-center justify-center text-primary text-2xl font-extrabold shrink-0 shadow-sm">
@@ -85,14 +85,14 @@ export default function ProfilePage() {
                 </span>
               </div>
             </div>
-            {user.role === "tester" && adminName && (
-              <div className="flex justify-end mt-3">
-                <p className="text-xs text-muted-foreground">
-                  Developer: <span className="font-medium text-foreground">{adminName}</span>
-                </p>
-              </div>
-            )}
           </div>
+          {user.role === "tester" && adminName && (
+            <div className="px-6 py-3 border-t border-border/50 flex justify-end">
+              <p className="text-xs text-muted-foreground">
+                Developer: <span className="font-medium text-foreground">{adminName}</span>
+              </p>
+            </div>
+          )}
         </Card>
 
         {/* Name section */}
