@@ -15,7 +15,8 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   ArrowLeft, Plus, ChevronDown, Paperclip, FileText, Image, X, Upload,
-  UserPlus, Pencil, Download, Trash2,
+  UserPlus, Pencil, Download, Trash2, Eye,
+  CircleDot, CheckCircle2, BadgeCheck, RotateCcw,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,20 @@ const STATUS_STYLES: Record<BugStatus, string> = {
 };
 
 const ALL_STATUSES: BugStatus[] = ["Open", "Fixed", "Verified", "Reopen"];
+
+const STATUS_ICONS = {
+  Open: CircleDot,
+  Fixed: CheckCircle2,
+  Verified: BadgeCheck,
+  Reopen: RotateCcw,
+} as const;
+
+const STATUS_ICON_COLORS: Record<BugStatus, string> = {
+  Open: "text-blue-600",
+  Fixed: "text-green-600",
+  Verified: "text-purple-600",
+  Reopen: "text-red-600",
+};
 
 const ALL_TRANSITIONS: Record<BugStatus, BugStatus[]> = {
   Open: ["Fixed", "Verified", "Reopen"],
@@ -440,7 +455,7 @@ export default function ProjectDetailPage() {
                 className="cursor-pointer hover:bg-muted/30 transition-colors"
                 onClick={() => openBug(bug)}
               >
-                <TableCell className="pl-5 font-medium text-foreground">{bug.title}</TableCell>
+                <TableCell className={cn("pl-5 font-medium", bug.status === "Fixed" ? "line-through text-muted-foreground" : "text-foreground")}>{bug.title}</TableCell>
                 <TableCell className="text-muted-foreground text-sm">{bug.reporterName ?? bug.reportedBy.slice(0, 8) + "…"}</TableCell>
                 <TableCell className="text-muted-foreground text-sm">
                   {new Date(bug.createdAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
@@ -460,34 +475,42 @@ export default function ProjectDetailPage() {
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         className={cn(
-                          "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
+                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
                           STATUS_STYLES[bug.status]
                         )}
                       >
+                        {(() => { const Icon = STATUS_ICONS[bug.status]; return <Icon className="w-3 h-3" />; })()}
                         {bug.status}
-                        <ChevronDown className="w-3 h-3" />
+                        <ChevronDown className="w-3 h-3 opacity-60" />
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="w-36">
-                        {transitions[bug.status].map((s) => (
-                          <DropdownMenuItem key={s} onClick={() => handleStatusChange(bug.bugId, s)} className="gap-2">
-                            <span className={cn("w-2 h-2 rounded-full",
-                              s === "Fixed" && "bg-green-500",
-                              s === "Verified" && "bg-purple-500",
-                              s === "Reopen" && "bg-red-500"
-                            )} />
-                            {s}
-                          </DropdownMenuItem>
-                        ))}
+                      <DropdownMenuContent align="start" className="w-40">
+                        {transitions[bug.status].map((s) => {
+                          const Icon = STATUS_ICONS[s];
+                          return (
+                            <DropdownMenuItem key={s} onClick={() => handleStatusChange(bug.bugId, s)} className="gap-2">
+                              <Icon className={cn("w-3.5 h-3.5 shrink-0", STATUS_ICON_COLORS[s])} />
+                              {s}
+                            </DropdownMenuItem>
+                          );
+                        })}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   ) : (
-                    <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium", STATUS_STYLES[bug.status])}>
+                    <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium", STATUS_STYLES[bug.status])}>
+                      {(() => { const Icon = STATUS_ICONS[bug.status]; return <Icon className="w-3 h-3" />; })()}
                       {bug.status}
                     </span>
                   )}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-0.5">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openBug(bug); }}
+                      className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                      title="View bug"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
                     <button
                       onClick={(e) => openEditBug(e, bug)}
                       className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
@@ -752,20 +775,28 @@ export default function ProjectDetailPage() {
                 {transitions[selectedBug.status].length > 0 ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger className={cn(
-                      "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium shrink-0 transition-colors",
+                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium shrink-0 transition-colors",
                       STATUS_STYLES[selectedBug.status]
                     )}>
+                      {(() => { const Icon = STATUS_ICONS[selectedBug.status]; return <Icon className="w-3 h-3" />; })()}
                       {selectedBug.status}
-                      <ChevronDown className="w-3 h-3" />
+                      <ChevronDown className="w-3 h-3 opacity-60" />
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {transitions[selectedBug.status].map((s) => (
-                        <DropdownMenuItem key={s} onClick={() => handleStatusChange(selectedBug.bugId, s)}>{s}</DropdownMenuItem>
-                      ))}
+                    <DropdownMenuContent align="end" className="w-40">
+                      {transitions[selectedBug.status].map((s) => {
+                        const Icon = STATUS_ICONS[s];
+                        return (
+                          <DropdownMenuItem key={s} onClick={() => handleStatusChange(selectedBug.bugId, s)} className="gap-2">
+                            <Icon className={cn("w-3.5 h-3.5 shrink-0", STATUS_ICON_COLORS[s])} />
+                            {s}
+                          </DropdownMenuItem>
+                        );
+                      })}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 ) : (
-                  <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium shrink-0", STATUS_STYLES[selectedBug.status])}>
+                  <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium shrink-0", STATUS_STYLES[selectedBug.status])}>
+                    {(() => { const Icon = STATUS_ICONS[selectedBug.status]; return <Icon className="w-3 h-3" />; })()}
                     {selectedBug.status}
                   </span>
                 )}
