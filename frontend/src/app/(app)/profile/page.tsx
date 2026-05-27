@@ -61,15 +61,23 @@ export default function ProfilePage() {
 
         {/* Avatar + identity card */}
         <Card className="mb-5 overflow-hidden">
-          <div className="h-20 bg-gradient-to-br from-primary/20 via-primary/10 to-transparent" />
-          <div className="px-6 pb-5 -mt-8">
-            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          {/* Header banner */}
+          <div className="relative h-32 overflow-hidden bg-gradient-to-br from-primary via-primary/95 to-orange-600">
+            <div className="absolute -top-8 -right-8 w-44 h-44 rounded-full bg-white/10" />
+            <div className="absolute -bottom-12 right-28 w-32 h-32 rounded-full bg-white/[0.07]" />
+            <div className="absolute top-4 right-52 w-14 h-14 rounded-full bg-white/10" />
+            <div className="absolute -top-4 left-[38%] w-24 h-24 rounded-full bg-black/[0.04]" />
+          </div>
+
+          {/* Identity row */}
+          <div className="px-6 pb-5 -mt-10">
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
               <div className="flex items-end gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-primary/15 border-4 border-background flex items-center justify-center text-primary text-2xl font-extrabold shrink-0 shadow-sm">
+                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-orange-600 border-4 border-card shadow-lg shadow-primary/25 flex items-center justify-center text-white text-3xl font-extrabold shrink-0">
                   {user.name.charAt(0).toUpperCase()}
                 </div>
                 <div className="pb-1 min-w-0">
-                  <h2 className="text-lg font-extrabold text-foreground tracking-tight leading-tight truncate">{user.name}</h2>
+                  <h2 className="text-xl font-extrabold text-foreground tracking-tight leading-tight truncate">{user.name}</h2>
                   <p className="text-sm text-muted-foreground truncate">{user.email}</p>
                 </div>
               </div>
@@ -86,6 +94,7 @@ export default function ProfilePage() {
               </div>
             </div>
           </div>
+
           {user.role === "tester" && adminName && (
             <div className="px-6 py-3 border-t border-border/50 flex justify-end">
               <p className="text-xs text-muted-foreground">
