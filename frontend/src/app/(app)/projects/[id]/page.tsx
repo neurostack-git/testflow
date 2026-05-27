@@ -208,7 +208,7 @@ export default function ProjectDetailPage() {
         documents,
       });
 
-      setBugs((prev) => [newBug, ...prev]);
+      setBugs((prev) => [{ ...newBug, reporterName: user?.name ?? "" }, ...prev]);
       setDialogOpen(false);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to submit bug");
