@@ -27,12 +27,12 @@ VALID_TRANSITIONS = {
         "Reopen":   ["Fixed", "Invalid"], # legacy alias
     },
     "tester": {
-        "Open":     [],
+        "Open":     ["Closed"],
         "Fixed":    ["Closed", "Open"],
         "Closed":   ["Open"],
-        "Invalid":  [],
-        "Verified": ["Open"],    # legacy alias
-        "Reopen":   ["Closed"],  # legacy alias
+        "Invalid":  ["Closed", "Open"],
+        "Verified": ["Open"],           # legacy alias
+        "Reopen":   ["Closed"],         # legacy alias
     },
 }
 

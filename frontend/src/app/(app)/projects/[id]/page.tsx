@@ -69,12 +69,12 @@ const ADMIN_TRANSITIONS: Record<string, BugStatus[]> = {
 };
 
 const TESTER_TRANSITIONS: Record<string, BugStatus[]> = {
-  Open:     [],
+  Open:     ["Closed"],
   Fixed:    ["Closed", "Open"],
   Closed:   ["Open"],
-  Invalid:  [],
-  Verified: ["Open"],    // legacy alias
-  Reopen:   ["Closed"],  // legacy alias
+  Invalid:  ["Closed", "Open"],
+  Verified: ["Open"],            // legacy alias
+  Reopen:   ["Closed"],          // legacy alias
 };
 
 const REPORT_ACCEPT = ".md,.txt,.pdf,.docx,text/markdown,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
