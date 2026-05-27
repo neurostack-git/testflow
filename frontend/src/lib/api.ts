@@ -6,17 +6,26 @@ async function request<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const jwt = await getJwt();
-  const res = await fetch(`${config.apiUrl}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: jwt,
-      ...(options.headers ?? {}),
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${config.apiUrl}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: jwt,
+        ...(options.headers ?? {}),
+      },
+    });
+  } catch {
+    throw new Error("Unable to connect. Please check your internet connection.");
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `Request failed: ${res.status}`);
+    const serverMsg = body.error as string | undefined;
+    if (serverMsg && serverMsg !== "Forbidden") throw new Error(serverMsg);
+    if (res.status === 403) throw new Error("You don't have permission to do that.");
+    if (res.status >= 500) throw new Error("Something went wrong on our end. Please try again.");
+    throw new Error(serverMsg || "Something went wrong. Please try again.");
   }
   return res.json();
 }

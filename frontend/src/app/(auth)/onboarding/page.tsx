@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Eye, EyeOff, Check, X } from "lucide-react";
-import { completeNewPassword } from "@/lib/auth";
+import { completeNewPassword, mapAuthError } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
 import { usersApi } from "@/lib/api";
@@ -38,7 +38,7 @@ export default function OnboardingPage() {
       await refresh();
       router.push("/dashboard");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Setup failed");
+      setError(mapAuthError(err));
     } finally {
       setLoading(false);
     }

@@ -77,3 +77,30 @@ export async function updatePhone(phone: string) {
     userAttributes: { "custom:phone_number": phone },
   });
 }
+
+export function mapAuthError(err: unknown): string {
+  if (!(err instanceof Error)) return "Something went wrong. Please try again.";
+  const name = (err as { name?: string }).name ?? "";
+  switch (name) {
+    case "UserNotFoundException":
+      return "No account found with this email address.";
+    case "NotAuthorizedException":
+      return "Incorrect email or password.";
+    case "UserNotConfirmedException":
+      return "Please verify your email before signing in.";
+    case "UsernameExistsException":
+      return "An account with this email already exists.";
+    case "CodeMismatchException":
+      return "That code doesn't match. Please check and try again.";
+    case "ExpiredCodeException":
+      return "That code has expired. Please request a new one.";
+    case "LimitExceededException":
+      return "Too many attempts. Please try again later.";
+    case "InvalidPasswordException":
+      return "Password doesn't meet the requirements. It must be at least 8 characters.";
+    case "NetworkError":
+      return "Unable to connect. Please check your internet connection.";
+    default:
+      return err.message || "Something went wrong. Please try again.";
+  }
+}

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Bug, CheckCircle, Users, Zap, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
-import { loginUser } from "@/lib/auth";
+import { loginUser, mapAuthError } from "@/lib/auth";
 import { useAuth } from "@/context/auth-context";
 import { AnimatedBugLogo } from "@/components/ui/animated-bug-logo";
 
@@ -33,7 +33,7 @@ export default function LoginPage() {
         router.push("/dashboard");
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Sign in failed");
+      setError(mapAuthError(err));
     } finally {
       setLoading(false);
     }

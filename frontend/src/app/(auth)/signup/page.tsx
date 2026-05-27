@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Bug, CheckCircle, Users, Zap, Eye, EyeOff, Lock, Mail, User, Check, X } from "lucide-react";
 import Link from "next/link";
-import { registerAdmin, confirmUserSignUp } from "@/lib/auth";
+import { registerAdmin, confirmUserSignUp, mapAuthError } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { AnimatedBugLogo } from "@/components/ui/animated-bug-logo";
 
@@ -43,7 +43,7 @@ export default function SignupPage() {
       await registerAdmin(name, email, password);
       setStep("verify");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Registration failed");
+      setError(mapAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -57,7 +57,7 @@ export default function SignupPage() {
       await confirmUserSignUp(email, code.trim());
       setStep("success");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Verification failed. Check your code and try again.");
+      setError(mapAuthError(err));
     } finally {
       setLoading(false);
     }
