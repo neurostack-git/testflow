@@ -73,7 +73,7 @@ export default function ProfilePage() {
           <div className="px-6 pb-5 -mt-10">
             <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
               <div className="flex items-end gap-4">
-                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-orange-600 border-4 border-card shadow-lg shadow-primary/25 flex items-center justify-center text-white text-3xl font-extrabold shrink-0">
+                <div className="w-20 h-20 rounded-full bg-white border-4 border-card shadow-lg shadow-primary/25 flex items-center justify-center text-primary text-3xl font-extrabold shrink-0">
                   {user.name.charAt(0).toUpperCase()}
                 </div>
                 <div className="pb-1 min-w-0">
