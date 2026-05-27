@@ -791,9 +791,10 @@ export default function ProjectDetailPage() {
               </div>
             </form>
           ) : selectedBug ? (
-            <div className="space-y-5 mt-2">
+            <div className="space-y-4 mt-1">
+              {/* Title + status */}
               <div className="flex items-start justify-between gap-3">
-                <h3 className="font-semibold text-foreground text-base leading-snug">{selectedBug.title}</h3>
+                <h3 className="font-bold text-foreground text-lg leading-snug">{selectedBug.title}</h3>
                 {transitions[selectedBug.status].length > 0 ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger className={cn(
@@ -823,28 +824,37 @@ export default function ProjectDetailPage() {
                   </span>
                 )}
               </div>
-              <div className="flex gap-6 text-sm text-muted-foreground">
-                <span>Reported: <strong className="text-foreground">{new Date(selectedBug.createdAt).toLocaleDateString()}</strong></span>
-                <span>Updated: <strong className="text-foreground">{new Date(selectedBug.updatedAt).toLocaleDateString()}</strong></span>
+
+              {/* Meta row — small, muted */}
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
+                {selectedBug.reporterName && <span>{selectedBug.reporterName}</span>}
+                {selectedBug.reporterName && <span className="w-0.5 h-3 bg-border rounded-full inline-block" />}
+                <span>Reported {new Date(selectedBug.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
+                <span className="w-0.5 h-3 bg-border rounded-full inline-block" />
+                <span>Updated {new Date(selectedBug.updatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
               </div>
+
+              {/* Description — main content */}
               {selectedBug.description && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Description</p>
+                <div className="rounded-xl bg-muted/40 border border-border/50 p-4">
+                  <p className="text-sm font-medium text-muted-foreground mb-1.5">Description</p>
                   <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{selectedBug.description}</p>
                 </div>
               )}
+
+              {/* Screenshots */}
               {selectedBug.screenshots.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                     Screenshots ({selectedBug.screenshots.length})
                   </p>
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {selectedBug.screenshots.map((key, i) => (
                       <button
                         key={i}
                         type="button"
                         onClick={() => openLightbox(key)}
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border text-sm text-foreground hover:bg-muted/30 transition-colors group"
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border text-sm text-foreground hover:bg-muted/30 hover:border-primary/30 transition-colors group"
                       >
                         <Image className="w-4 h-4 text-primary shrink-0" />
                         <span className="truncate flex-1 text-left">{key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop()}</span>
@@ -854,12 +864,14 @@ export default function ProjectDetailPage() {
                   </div>
                 </div>
               )}
+
+              {/* Documents */}
               {selectedBug.documents.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                     Documents ({selectedBug.documents.length})
                   </p>
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {selectedBug.documents.map((key, i) => (
                       <div key={i} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border text-sm text-foreground">
                         <FileText className="w-4 h-4 text-muted-foreground" />
