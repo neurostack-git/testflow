@@ -9,6 +9,7 @@ import { Bug, CheckCircle, Users, Zap, Eye, EyeOff, Lock, Mail, User, Check, X }
 import Link from "next/link";
 import { registerAdmin, confirmUserSignUp } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { AnimatedBugLogo } from "@/components/ui/animated-bug-logo";
 
 type Step = "register" | "verify" | "success";
 
@@ -76,8 +77,8 @@ export default function SignupPage() {
         className="hidden lg:flex lg:w-[52%] flex-col justify-between p-14 text-white"
         style={{ background: "linear-gradient(145deg, oklch(0.72 0.15 50) 0%, oklch(0.60 0.17 44) 100%)" }}
       >
-        <div className="flex items-center gap-3">
-          <img src="/logo.svg" alt="TestFlow" className="w-9 h-9 rounded-xl ring-2 ring-white/40" />
+        <div className="flex items-center gap-3" style={{ overflow: "visible" }}>
+          <AnimatedBugLogo />
           <span className="text-xl font-extrabold tracking-tight">TestFlow</span>
         </div>
         <div className="space-y-10">

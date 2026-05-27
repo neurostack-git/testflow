@@ -99,6 +99,48 @@
   to   { background-position: 200% center;  }
 }
 
+@keyframes tf-bug-fly {
+  /* --- sitting in logo --- */
+  0% {
+    transform: translate(0,0) rotate(0deg) scale(1);
+    animation-timing-function: cubic-bezier(0.55,0,0.65,0.3);
+  }
+  /* lift off */
+  7% {
+    transform: translate(6px,-24px) rotate(-30deg) scale(1.35);
+    animation-timing-function: cubic-bezier(0,0,0.1,1);
+  }
+  /* zoom right past the heading */
+  20% {
+    transform: translate(210px,-45px) rotate(24deg) scale(2.5);
+    animation-timing-function: linear;
+  }
+  /* wide arc — top right of panel */
+  35% {
+    transform: translate(390px,85px) rotate(8deg) scale(2.9);
+    animation-timing-function: linear;
+  }
+  /* sweep down toward bottom */
+  50% {
+    transform: translate(255px,355px) rotate(-26deg) scale(2.2);
+    animation-timing-function: linear;
+  }
+  /* come back past logo, below it */
+  58% {
+    transform: translate(8px,210px) rotate(14deg) scale(1.45);
+    animation-timing-function: cubic-bezier(0.3,0,0.1,1);
+  }
+  /* final approach */
+  63% {
+    transform: translate(1px,3px) rotate(-4deg) scale(1.05);
+    animation-timing-function: cubic-bezier(0,0,0.2,1);
+  }
+  /* --- back in logo, hold --- */
+  67%, 100% {
+    transform: translate(0,0) rotate(0deg) scale(1);
+  }
+}
+
 @layer utilities {
   .tf-fade-up {
     animation-name: tf-fade-up;
@@ -113,6 +155,9 @@
   .tf-dot-bg {
     background-image: radial-gradient(circle, oklch(0.84 0.018 55 / 0.45) 1px, transparent 1px);
     background-size: 22px 22px;
+  }
+  .tf-bug-fly {
+    animation: tf-bug-fly 10s linear 1.2s infinite both;
   }
 }
 

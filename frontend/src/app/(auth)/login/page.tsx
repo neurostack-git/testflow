@@ -9,6 +9,7 @@ import { Bug, CheckCircle, Users, Zap, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { loginUser } from "@/lib/auth";
 import { useAuth } from "@/context/auth-context";
+import { AnimatedBugLogo } from "@/components/ui/animated-bug-logo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -45,8 +46,8 @@ export default function LoginPage() {
         className="hidden lg:flex lg:w-[52%] flex-col justify-between p-14 text-white"
         style={{ background: "linear-gradient(145deg, oklch(0.72 0.15 50) 0%, oklch(0.60 0.17 44) 100%)" }}
       >
-        <div className="flex items-center gap-3">
-          <img src="/logo.svg" alt="TestFlow" className="w-9 h-9 rounded-xl ring-2 ring-white/40" />
+        <div className="flex items-center gap-3" style={{ overflow: "visible" }}>
+          <AnimatedBugLogo />
           <span className="text-xl font-extrabold tracking-tight">TestFlow</span>
         </div>
 
