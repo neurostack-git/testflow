@@ -295,6 +295,12 @@ def get_project(project_id: str, user_sub: str, user_role: str) -> dict:
     )
     item["testerCount"] = members.get("Count", 0)
 
+    admin_sub = item.get("GSI1PK", "").replace("ADMIN#", "")
+    if admin_sub:
+        admin_profile = table.get_item(Key={"PK": f"USER#{admin_sub}", "SK": "PROFILE"}).get("Item")
+        if admin_profile:
+            item["adminName"] = admin_profile.get("name", "")
+
     return response(200, item)
 
 

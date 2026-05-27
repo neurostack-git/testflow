@@ -3,6 +3,7 @@ import os
 import secrets
 import time
 import boto3
+from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 dynamodb = boto3.resource("dynamodb")
@@ -48,6 +49,26 @@ def get_profile(user_sub: str) -> dict:
         return response(404, {"error": "User not found"})
     item.pop("PK", None)
     item.pop("SK", None)
+
+    if item.get("role") == "tester":
+        try:
+            memberships = table.query(
+                IndexName="GSI1",
+                KeyConditionExpression=Key("GSI1PK").eq(f"USER#{user_sub}") & Key("GSI1SK").begins_with("PROJECT#"),
+                Limit=1,
+            ).get("Items", [])
+            if memberships:
+                project_id = memberships[0]["GSI1SK"].replace("PROJECT#", "")
+                proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
+                if proj:
+                    admin_sub = proj.get("GSI1PK", "").replace("ADMIN#", "")
+                    if admin_sub:
+                        admin_profile = table.get_item(Key={"PK": f"USER#{admin_sub}", "SK": "PROFILE"}).get("Item")
+                        if admin_profile:
+                            item["adminName"] = admin_profile.get("name", "")
+        except Exception:
+            pass
+
     return response(200, item)
 
 

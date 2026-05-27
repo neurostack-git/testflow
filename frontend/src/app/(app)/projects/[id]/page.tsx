@@ -418,7 +418,14 @@ export default function ProjectDetailPage() {
           </Button>
         )}
       </div>
-      <p className="text-muted-foreground mb-8 ml-7">{bugs.length} bug{bugs.length !== 1 ? "s" : ""}</p>
+      <div className="flex items-center gap-4 mb-8 ml-7">
+        <p className="text-muted-foreground">{bugs.length} bug{bugs.length !== 1 ? "s" : ""}</p>
+        {role === "tester" && project?.adminName && (
+          <p className="text-sm text-muted-foreground">
+            Developer: <span className="font-medium text-foreground">{project.adminName}</span>
+          </p>
+        )}
+      </div>
 
       {error && <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg mb-4">{error}</p>}
 

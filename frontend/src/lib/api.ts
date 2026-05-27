@@ -142,6 +142,7 @@ export interface Project {
   createdAt: string;
   testerCount?: number;
   deletedAt?: string;
+  adminName?: string;
 }
 
 export interface Bug {
@@ -192,6 +193,7 @@ export interface UserProfile {
   name: string;
   phone: string;
   role: "admin" | "tester";
+  adminName?: string;
 }
 
 export interface ProjectReport {
