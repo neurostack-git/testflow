@@ -309,14 +309,27 @@ def list_members(project_id: str, user_sub: str, user_role: str) -> dict:
     result = table.query(
         KeyConditionExpression=Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("MEMBER#"),
     )
+    raw_members = result.get("Items", [])
+
+    # Batch-fetch user profiles to get real display names
+    if raw_members:
+        keys = [{"PK": f"USER#{item['SK'].replace('MEMBER#', '')}", "SK": "PROFILE"} for item in raw_members]
+        batch_result = dynamodb.batch_get_item(RequestItems={TABLE_NAME: {"Keys": keys}})
+        profiles = {
+            p["PK"].replace("USER#", ""): p
+            for p in batch_result.get("Responses", {}).get(TABLE_NAME, [])
+        }
+    else:
+        profiles = {}
+
     members = [
         {
             "memberId": item["SK"].replace("MEMBER#", ""),
             "email": item.get("email", ""),
-            "name": item.get("name", item.get("email", "").split("@")[0]),
+            "name": profiles.get(item["SK"].replace("MEMBER#", ""), {}).get("name") or item.get("email", "").split("@")[0],
             "joinedAt": item.get("joinedAt", ""),
         }
-        for item in result.get("Items", [])
+        for item in raw_members
     ]
 
     return response(200, {"members": members})
