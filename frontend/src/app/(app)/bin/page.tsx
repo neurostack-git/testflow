@@ -81,7 +81,7 @@ export default function BinPage() {
           {projects.map((project) => (
             <div
               key={project.projectId}
-              className="border border-border rounded-xl bg-card p-5 flex items-center justify-between gap-4"
+              className="border border-border rounded-xl bg-card p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-9 h-9 bg-muted/50 rounded-xl flex items-center justify-center shrink-0">
