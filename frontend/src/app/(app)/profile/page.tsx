@@ -51,16 +51,30 @@ export default function ProfilePage() {
         </div>
 
         {/* Avatar + identity card */}
-        <Card className="p-5 mb-5 flex items-center gap-4">
-          <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center text-primary text-xl font-extrabold shrink-0">
-            {user.name.charAt(0).toUpperCase()}
-          </div>
-          <div>
-            <p className="font-bold text-foreground text-base leading-tight">{user.name}</p>
-            <p className="text-sm text-muted-foreground mt-0.5">{user.email}</p>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <Shield className="w-3.5 h-3.5 text-primary" />
-              <span className="text-xs text-primary font-semibold capitalize">{user.role}</span>
+        <Card className="mb-5 overflow-hidden">
+          <div className="h-20 bg-gradient-to-br from-primary/20 via-primary/10 to-transparent" />
+          <div className="px-6 pb-6 -mt-8">
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+              <div className="flex items-end gap-4">
+                <div className="w-16 h-16 rounded-2xl bg-primary/15 border-4 border-background flex items-center justify-center text-primary text-2xl font-extrabold shrink-0 shadow-sm">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="pb-1 min-w-0">
+                  <h2 className="text-lg font-extrabold text-foreground tracking-tight leading-tight truncate">{user.name}</h2>
+                  <p className="text-sm text-muted-foreground truncate">{user.email}</p>
+                </div>
+              </div>
+              <div className="sm:pb-1">
+                <span className={cn(
+                  "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border",
+                  user.role === "admin"
+                    ? "bg-primary/10 text-primary border-primary/20"
+                    : "bg-blue-50 text-blue-700 border-blue-200"
+                )}>
+                  <Shield className="w-3 h-3" />
+                  <span className="capitalize">{user.role}</span>
+                </span>
+              </div>
             </div>
           </div>
         </Card>
