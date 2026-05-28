@@ -168,9 +168,11 @@ export default function ProjectDetailPage() {
   const [reportViewer, setReportViewer] = useState<{ url: string; filename: string; contentType: string; textContent?: string } | null>(null);
   const [reportViewLoading, setReportViewLoading] = useState<string | null>(null);
 
-  // Status tab filter + search
+  // Status tab filter + search + summary filters
   const [activeTab, setActiveTab] = useState("All");
   const [bugSearch, setBugSearch] = useState("");
+  const [summaryFilter, setSummaryFilter] = useState<"unsolved" | "today" | null>(null);
+  const [testerFilter, setTesterFilter] = useState<string | null>(null);
 
   const role = user?.role ?? "tester";
   const transitions = role === "admin" ? ADMIN_TRANSITIONS : TESTER_TRANSITIONS;
@@ -182,17 +184,26 @@ export default function ProjectDetailPage() {
     if (tab === "Closed") return bugs.filter(b => b.status === "Closed" || (b.status as string) === "Verified").length;
     return bugs.filter(b => b.status === tab).length;
   };
+  const todayStr = new Date().toDateString();
   const tabFilteredBugs = activeTab === "All" ? bugs
     : activeTab === "Open" ? bugs.filter(b => b.status === "Open" || (b.status as string) === "Reopen")
     : activeTab === "Closed" ? bugs.filter(b => b.status === "Closed" || (b.status as string) === "Verified")
     : bugs.filter(b => b.status === activeTab);
+  const summaryFiltered = summaryFilter === "unsolved"
+    ? tabFilteredBugs.filter(b => b.status === "Open" || b.status === "Fixed")
+    : summaryFilter === "today"
+    ? tabFilteredBugs.filter(b => new Date(b.createdAt).toDateString() === todayStr)
+    : tabFilteredBugs;
+  const testerFiltered = testerFilter
+    ? summaryFiltered.filter(b => (b.reporterName ?? b.reportedBy) === testerFilter)
+    : summaryFiltered;
   const searchQuery = bugSearch.trim().toLowerCase();
   const filteredBugs = searchQuery
-    ? tabFilteredBugs.filter(b =>
+    ? testerFiltered.filter(b =>
         b.title.toLowerCase().includes(searchQuery) ||
         b.description.toLowerCase().includes(searchQuery)
       )
-    : tabFilteredBugs;
+    : testerFiltered;
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -599,7 +610,7 @@ export default function ProjectDetailPage() {
           </button>
         </div>
       </div>
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-4">
         <p className="text-muted-foreground ml-7">{bugs.length} bug{bugs.length !== 1 ? "s" : ""}</p>
         {role === "tester" && project?.adminName && (
           <p className="text-sm text-muted-foreground">
@@ -607,6 +618,80 @@ export default function ProjectDetailPage() {
           </p>
         )}
       </div>
+
+      {/* Summary stats */}
+      {bugs.length > 0 && (() => {
+        const unsolved = bugs.filter(b => b.status === "Open" || b.status === "Fixed").length;
+        const todayCount = bugs.filter(b => new Date(b.createdAt).toDateString() === todayStr).length;
+        const byPerson = bugs.reduce<Record<string, number>>((acc, b) => {
+          const name = b.reporterName ?? b.reportedBy;
+          acc[name] = (acc[name] ?? 0) + 1;
+          return acc;
+        }, {});
+        const statCards = [
+          {
+            label: "Total Bugs", value: bugs.length, color: "text-foreground",
+            active: !summaryFilter && !testerFilter && activeTab === "All",
+            onClick: () => { setSummaryFilter(null); setTesterFilter(null); setActiveTab("All"); },
+          },
+          {
+            label: "Unsolved", value: unsolved, color: "text-orange-500",
+            active: summaryFilter === "unsolved",
+            onClick: () => { setSummaryFilter(summaryFilter === "unsolved" ? null : "unsolved"); setTesterFilter(null); setActiveTab("All"); },
+          },
+          {
+            label: "Today", value: todayCount, color: "text-blue-600",
+            active: summaryFilter === "today",
+            onClick: () => { setSummaryFilter(summaryFilter === "today" ? null : "today"); setTesterFilter(null); setActiveTab("All"); },
+          },
+        ];
+        return (
+          <div className="mb-5 ml-7 space-y-2">
+            {/* Stat cards row */}
+            <div className="flex flex-wrap gap-2">
+              {statCards.map(({ label, value, color, active, onClick }) => (
+                <button
+                  key={label}
+                  onClick={onClick}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-2 rounded-lg border text-left transition-colors",
+                    active
+                      ? "border-primary bg-primary/5"
+                      : "border-border bg-card hover:border-primary/40 hover:bg-muted/30"
+                  )}
+                >
+                  <span className={cn("text-lg font-bold leading-none", color)}>{value}</span>
+                  <span className="text-xs text-muted-foreground">{label}</span>
+                </button>
+              ))}
+            </div>
+            {/* Tester chips row */}
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(byPerson).map(([name, count]) => {
+                const isActive = testerFilter === name;
+                return (
+                  <button
+                    key={name}
+                    onClick={() => { setTesterFilter(isActive ? null : name); setSummaryFilter(null); setActiveTab("All"); }}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                      isActive
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                    )}
+                  >
+                    {trimName(name, 20)}
+                    <span className={cn(
+                      "inline-flex items-center justify-center rounded-full w-4 h-4 text-[10px] font-bold",
+                      isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                    )}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {error && <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg mb-4">{error}</p>}
 
@@ -620,7 +705,7 @@ export default function ProjectDetailPage() {
               return (
                 <button
                   key={tab}
-                  onClick={() => setActiveTab(tab)}
+                  onClick={() => { setActiveTab(tab); setSummaryFilter(null); setTesterFilter(null); }}
                   className={cn(
                     "shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap",
                     isActive
