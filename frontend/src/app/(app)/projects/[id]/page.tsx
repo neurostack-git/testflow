@@ -34,7 +34,7 @@ const STATUS_STYLES: Record<string, string> = {
   Open:     "bg-blue-100 text-blue-700 hover:bg-blue-200",
   Fixed:    "bg-green-100 text-green-700 hover:bg-green-200",
   Closed:   "bg-purple-100 text-purple-700 hover:bg-purple-200",
-  Invalid:  "bg-gray-100 text-gray-600 hover:bg-gray-200",
+  Invalid:  "bg-red-100 text-red-600 hover:bg-red-200",
   Verified: "bg-purple-100 text-purple-700 hover:bg-purple-200", // legacy alias
   Reopen:   "bg-blue-100 text-blue-700 hover:bg-blue-200",       // legacy alias
 };
@@ -54,18 +54,18 @@ const STATUS_ICON_COLORS: Record<string, string> = {
   Open:     "text-blue-600",
   Fixed:    "text-green-600",
   Closed:   "text-purple-600",
-  Invalid:  "text-gray-500",
+  Invalid:  "text-red-500",
   Verified: "text-purple-600", // legacy alias
   Reopen:   "text-blue-600",   // legacy alias
 };
 
 const ADMIN_TRANSITIONS: Record<string, BugStatus[]> = {
-  Open:     ["Fixed", "Invalid"],
-  Fixed:    ["Invalid", "Open"],
-  Closed:   ["Open", "Fixed"],
-  Invalid:  ["Open"],
-  Verified: ["Open", "Fixed"],   // legacy alias
-  Reopen:   ["Fixed", "Invalid"], // legacy alias
+  Open:     ["Fixed", "Closed", "Invalid"],
+  Fixed:    ["Open", "Closed", "Invalid"],
+  Closed:   ["Open", "Fixed", "Invalid"],
+  Invalid:  ["Open", "Fixed", "Closed"],
+  Verified: ["Open", "Fixed", "Invalid"],         // legacy alias
+  Reopen:   ["Open", "Fixed", "Closed", "Invalid"], // legacy alias
 };
 
 const TESTER_TRANSITIONS: Record<string, BugStatus[]> = {
@@ -685,21 +685,22 @@ export default function ProjectDetailPage() {
           </TableHeader>
           <TableBody>
             {filteredBugs.map((bug) => {
-              const isClosed = bug.status === "Closed" || bug.status === "Invalid" || (bug.status as string) === "Verified";
+              const isClosed = bug.status === "Closed" || (bug.status as string) === "Verified";
+              const isInvalid = bug.status === "Invalid";
               return (
               <TableRow
                 key={bug.bugId}
                 className="cursor-pointer hover:bg-muted/30 transition-colors"
                 onClick={() => openBug(bug)}
               >
-                <TableCell className={cn("pl-5 font-medium", isClosed ? "line-through text-muted-foreground" : "text-foreground")}>{bug.title}</TableCell>
-                <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>{bug.reporterName ?? bug.reportedBy.slice(0, 8) + "…"}</TableCell>
-                <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>
+                <TableCell className={cn("pl-5 font-medium", isClosed ? "line-through text-muted-foreground" : isInvalid ? "text-red-500" : "text-foreground")}>{bug.title}</TableCell>
+                <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-400" : "text-muted-foreground")}>{bug.reporterName ?? bug.reportedBy.slice(0, 8) + "…"}</TableCell>
+                <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-400" : "text-muted-foreground")}>
                   {new Date(bug.createdAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   {(bug.screenshots.length + bug.documents.length + (bug.videos?.length ?? 0)) > 0 ? (
-                    <div className={cn("flex items-center gap-1 text-sm", isClosed ? "line-through text-muted-foreground/60" : "text-muted-foreground")}>
+                    <div className={cn("flex items-center gap-1 text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-400" : "text-muted-foreground")}>
                       <Image className="w-3.5 h-3.5" />
                       {bug.screenshots.length + bug.documents.length + (bug.videos?.length ?? 0)}
                     </div>
@@ -730,14 +731,15 @@ export default function ProjectDetailPage() {
                             const Icon = STATUS_ICONS[s];
                             const isCurrent = s === bug.status;
                             const isAllowed = validTransitions.includes(s);
+                            const isInvalidStatus = s === "Invalid";
                             return (
                               <DropdownMenuItem
                                 key={s}
                                 disabled={isCurrent || !isAllowed}
                                 onClick={() => isAllowed && handleStatusChange(bug.bugId, s)}
-                                className="gap-2"
+                                className={cn("gap-2", isInvalidStatus && "text-red-500 focus:text-red-500")}
                               >
-                                <Icon className={cn("w-3.5 h-3.5 shrink-0", STATUS_ICON_COLORS[s])} />
+                                <Icon className={cn("w-3.5 h-3.5 shrink-0", isInvalidStatus ? "text-red-500" : STATUS_ICON_COLORS[s])} />
                                 <span className={isCurrent ? "font-semibold" : ""}>{s}</span>
                                 {isCurrent && <Check className="w-3 h-3 ml-auto opacity-70" />}
                               </DropdownMenuItem>
@@ -1089,9 +1091,10 @@ export default function ProjectDetailPage() {
                     <DropdownMenuContent align="end" className="w-40">
                       {transitions[selectedBug.status].map((s) => {
                         const Icon = STATUS_ICONS[s];
+                        const isInvalidStatus = s === "Invalid";
                         return (
-                          <DropdownMenuItem key={s} onClick={() => handleStatusChange(selectedBug.bugId, s)} className="gap-2">
-                            <Icon className={cn("w-3.5 h-3.5 shrink-0", STATUS_ICON_COLORS[s])} />
+                          <DropdownMenuItem key={s} onClick={() => handleStatusChange(selectedBug.bugId, s)} className={cn("gap-2", isInvalidStatus && "text-red-500 focus:text-red-500")}>
+                            <Icon className={cn("w-3.5 h-3.5 shrink-0", isInvalidStatus ? "text-red-500" : STATUS_ICON_COLORS[s])} />
                             {s}
                           </DropdownMenuItem>
                         );
@@ -1233,7 +1236,11 @@ export default function ProjectDetailPage() {
                       onClick={() => setEditStatus(s)}
                       className={cn(
                         "px-3 py-1 rounded-full text-xs font-semibold border transition-colors",
-                        editStatus === s ? STATUS_STYLES[s] : "border-border text-muted-foreground hover:bg-muted/50"
+                        editStatus === s
+                          ? STATUS_STYLES[s]
+                          : s === "Invalid"
+                            ? "border-red-200 text-red-400 hover:bg-red-50"
+                            : "border-border text-muted-foreground hover:bg-muted/50"
                       )}
                     >
                       {s}

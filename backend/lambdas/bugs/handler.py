@@ -19,12 +19,12 @@ _ALL = ["Open", "Fixed", "Closed", "Invalid"]
 
 VALID_TRANSITIONS = {
     "admin": {
-        "Open":     ["Fixed", "Invalid"],
-        "Fixed":    ["Invalid", "Open"],
-        "Closed":   ["Open", "Fixed"],
-        "Invalid":  ["Open"],
-        "Verified": ["Open", "Fixed"],   # legacy alias
-        "Reopen":   ["Fixed", "Invalid"], # legacy alias
+        "Open":     ["Fixed", "Closed", "Invalid"],
+        "Fixed":    ["Open", "Closed", "Invalid"],
+        "Closed":   ["Open", "Fixed", "Invalid"],
+        "Invalid":  ["Open", "Fixed", "Closed"],
+        "Verified": ["Open", "Fixed", "Invalid"],          # legacy alias
+        "Reopen":   ["Open", "Fixed", "Closed", "Invalid"], # legacy alias
     },
     "tester": {
         "Open":     ["Closed"],
