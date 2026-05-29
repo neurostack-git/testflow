@@ -121,10 +121,18 @@ export function useProjectChat(
         const data = JSON.parse(event.data as string);
 
         if (data.type === "MESSAGE") {
+          const incomingMsg = data.message as ChatMessage;
           setMessages((prev) => {
-            // De-duplicate in case of reconnect replay
-            if (prev.some((m) => m.messageId === data.message.messageId)) return prev;
-            return [...prev, data.message as ChatMessage];
+            if (prev.some((m) => m.messageId === incomingMsg.messageId)) return prev;
+            return [...prev, incomingMsg];
+          });
+          // If sender is not in our members list, refresh so @mentions resolve correctly
+          setMembers((prev) => {
+            const known = prev.some((m) => m.sub === incomingMsg.senderSub);
+            if (!known) {
+              chatApi.members(projectId).then((res) => setMembers(res.members)).catch(() => {});
+            }
+            return prev;
           });
           // Clear typing for sender
           setTypingUsers((prev) => {
