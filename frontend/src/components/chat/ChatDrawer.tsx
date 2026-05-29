@@ -224,9 +224,9 @@ export function ChatDrawer({
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {connected ? (
-              <Wifi className="w-3.5 h-3.5 text-green-500" title="Connected" />
+              <span title="Connected"><Wifi className="w-3.5 h-3.5 text-green-500" /></span>
             ) : (
-              <WifiOff className="w-3.5 h-3.5 text-muted-foreground" title="Connecting…" />
+              <span title="Connecting…"><WifiOff className="w-3.5 h-3.5 text-muted-foreground" /></span>
             )}
 
             {/* Clear chat — admin only */}
