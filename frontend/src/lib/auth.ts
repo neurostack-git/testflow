@@ -58,6 +58,13 @@ export async function getJwt(): Promise<string> {
   return token;
 }
 
+export async function getAccessToken(): Promise<string> {
+  const session = await fetchAuthSession();
+  const token = session.tokens?.accessToken?.toString();
+  if (!token) throw new Error("No active session");
+  return token;
+}
+
 export async function getAuthUser(): Promise<AuthUser> {
   const [user, attrs] = await Promise.all([
     getCurrentUser(),

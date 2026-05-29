@@ -10,6 +10,7 @@ import { Plus, FolderOpen, Bug, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { projectsApi, type Project } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -84,12 +85,15 @@ export default function DashboardPage() {
             {projects.length} project{projects.length !== 1 ? "s" : ""}
           </p>
         </div>
-        {role === "admin" && (
-          <Button onClick={() => setOpen(true)} className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-sm shadow-primary/20 gap-2">
-            <Plus className="w-4 h-4" />
-            New Project
-          </Button>
-        )}
+        <div className="flex items-center gap-3">
+          <NotificationBell />
+          {role === "admin" && (
+            <Button onClick={() => setOpen(true)} className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-sm shadow-primary/20 gap-2">
+              <Plus className="w-4 h-4" />
+              New Project
+            </Button>
+          )}
+        </div>
       </div>
 
       {error && (

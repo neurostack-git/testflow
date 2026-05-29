@@ -183,3 +183,21 @@
     letter-spacing: -0.01em;
   }
 }
+
+@keyframes bell-ring {
+  0%   { transform: rotate(0deg);    }
+  10%  { transform: rotate(22deg);   }
+  20%  { transform: rotate(-18deg);  }
+  30%  { transform: rotate(16deg);   }
+  40%  { transform: rotate(-12deg);  }
+  50%  { transform: rotate(8deg);    }
+  60%  { transform: rotate(-6deg);   }
+  70%  { transform: rotate(4deg);    }
+  80%  { transform: rotate(-2deg);   }
+  100% { transform: rotate(0deg);    }
+}
+
+.bell-ring {
+  animation: bell-ring 0.8s ease-in-out infinite;
+  transform-origin: top center;
+}

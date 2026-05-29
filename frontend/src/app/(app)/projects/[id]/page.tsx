@@ -29,6 +29,8 @@ import {
   type Project, type Bug, type BugStatus, type ProjectReport,
 } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
+import { ChatDrawer } from "@/components/chat/ChatDrawer";
+import { MessageCircle } from "lucide-react";
 
 const STATUS_STYLES: Record<string, string> = {
   Open:     "bg-blue-100 text-blue-700 hover:bg-blue-200",
@@ -167,6 +169,20 @@ export default function ProjectDetailPage() {
   const [reportError, setReportError] = useState("");
   const [reportViewer, setReportViewer] = useState<{ url: string; filename: string; contentType: string; textContent?: string } | null>(null);
   const [reportViewLoading, setReportViewLoading] = useState<string | null>(null);
+
+  // Chat drawer — lazy mount: only add to DOM after first open to avoid overflow
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatEverOpened, setChatEverOpened] = useState(false);
+  function openChat() { setChatOpen(true); setChatEverOpened(true); }
+  function closeChat() { setChatOpen(false); }
+
+  // Open chat automatically if navigated here from a notification (?chat=1)
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("chat") === "1") {
+      openChat();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Status tab filter + search + summary filters
   const [activeTab, setActiveTab] = useState("All");
@@ -1692,6 +1708,34 @@ export default function ProjectDetailPage() {
             />
           </div>
         </div>,
+        document.body
+      )}
+
+      {/* Floating chat bubble + drawer — portalled to body to escape tf-page-in transform stacking context */}
+      {createPortal(
+        <>
+          {!chatOpen && (
+            <button
+              onClick={openChat}
+              className="fixed bottom-6 right-6 z-[9998] p-3.5 rounded-full shadow-lg bg-primary text-primary-foreground hover:scale-105 hover:shadow-xl transition-all duration-200"
+              title="Project chat"
+            >
+              <MessageCircle className="w-5 h-5" />
+            </button>
+          )}
+
+          {project && chatEverOpened && (
+            <ChatDrawer
+              projectId={projectId}
+              projectTitle={project.title}
+              open={chatOpen}
+              onClose={closeChat}
+              currentUserSub={user?.sub ?? ""}
+              currentUserName={user?.name ?? ""}
+              currentUserRole={role}
+            />
+          )}
+        </>,
         document.body
       )}
 

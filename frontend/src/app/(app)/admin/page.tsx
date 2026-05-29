@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { UserPlus, Trash2, Users, ChevronRight, ChevronDown } from "lucide-react";
+import { UserPlus, Trash2, Users, ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
 import { projectsApi, authApi, type Project, type Member } from "@/lib/api";
 
 export default function AdminPage() {
@@ -18,7 +18,10 @@ export default function AdminPage() {
   const [inviteDialog, setInviteDialog] = useState<{ open: boolean; projectId: string | null }>({ open: false, projectId: null });
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
+  const [inviteSent, setInviteSent] = useState(false);
   const [error, setError] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; projectId: string; member: Member | null }>({ open: false, projectId: "", member: null });
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     projectsApi.list()
@@ -58,24 +61,7 @@ export default function AdminPage() {
     setError("");
     try {
       await authApi.inviteTester(inviteEmail.trim(), inviteDialog.projectId);
-      // Refresh members for this project
-      const pid = inviteDialog.projectId;
-      setMembers((prev) => {
-        const updated = { ...prev };
-        delete updated[pid];
-        return updated;
-      });
-      await loadMembers(pid);
-      // Update tester count on project card
-      setProjects((prev) =>
-        prev.map((p) =>
-          p.projectId === pid
-            ? { ...p, testerCount: (p.testerCount ?? 0) + 1 }
-            : p
-        )
-      );
-      setInviteEmail("");
-      setInviteDialog({ open: false, projectId: null });
+      setInviteSent(true);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to invite tester");
     } finally {
@@ -83,22 +69,36 @@ export default function AdminPage() {
     }
   }
 
-  async function handleRemove(projectId: string, memberId: string) {
+  function closeInviteDialog() {
+    setInviteDialog({ open: false, projectId: null });
+    setInviteEmail("");
+    setInviteSent(false);
+    setError("");
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirm.member) return;
+    setDeleting(true);
+    setError("");
     try {
-      await projectsApi.removeMember(projectId, memberId);
-      setMembers((prev) => ({
-        ...prev,
-        [projectId]: (prev[projectId] ?? []).filter((m) => m.memberId !== memberId),
-      }));
+      await projectsApi.removeMember(deleteConfirm.projectId, deleteConfirm.member.memberId);
+      const deletedId = deleteConfirm.member.memberId;
+      // Remove from ALL projects in local state (account is fully deleted)
+      setMembers((prev) => {
+        const updated: Record<string, Member[]> = {};
+        for (const [pid, list] of Object.entries(prev)) {
+          updated[pid] = list.filter((m) => m.memberId !== deletedId);
+        }
+        return updated;
+      });
       setProjects((prev) =>
-        prev.map((p) =>
-          p.projectId === projectId
-            ? { ...p, testerCount: Math.max(0, (p.testerCount ?? 1) - 1) }
-            : p
-        )
+        prev.map((p) => ({ ...p, testerCount: Math.max(0, (p.testerCount ?? 1) - 1) }))
       );
+      setDeleteConfirm({ open: false, projectId: "", member: null });
     } catch {
-      setError("Failed to remove tester");
+      setError("Failed to delete tester");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -189,7 +189,7 @@ export default function AdminPage() {
                               size="icon"
                               variant="ghost"
                               className="w-8 h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                              onClick={() => handleRemove(project.projectId, tester.memberId)}
+                              onClick={() => setDeleteConfirm({ open: true, projectId: project.projectId, member: tester })}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </Button>
@@ -209,40 +209,114 @@ export default function AdminPage() {
         )}
       </div>
 
-      <Dialog
-        open={inviteDialog.open}
-        onOpenChange={(o) => setInviteDialog({ open: o, projectId: o ? inviteDialog.projectId : null })}
-      >
+      <Dialog open={inviteDialog.open} onOpenChange={(o) => { if (!o) closeInviteDialog(); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Invite Tester</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleInvite} className="space-y-4 mt-2">
-            <div className="space-y-2">
-              <Label htmlFor="invite-email">Tester&apos;s email</Label>
-              <Input
-                id="invite-email"
-                type="email"
-                placeholder="tester@example.com"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                autoFocus
-                required
-              />
-              <p className="text-xs text-muted-foreground">
-                An invite email with login credentials will be sent automatically.
-              </p>
+
+          {inviteSent ? (
+            <div className="flex flex-col items-center text-center gap-4 py-4">
+              <div className="w-12 h-12 bg-green-100 rounded-2xl flex items-center justify-center">
+                <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">Invitation sent successfully!</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  An email with login credentials has been sent to<br />
+                  <span className="font-medium text-foreground">{inviteEmail}</span>
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  They will appear in the tester list after they log in for the first time.
+                </p>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <Button variant="outline" onClick={() => { setInviteSent(false); setInviteEmail(""); setError(""); }}>
+                  Invite another
+                </Button>
+                <Button className="bg-primary hover:bg-primary/90" onClick={closeInviteDialog}>
+                  Done
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleInvite} className="space-y-4 mt-2">
+              <div className="space-y-2">
+                <Label htmlFor="invite-email">Tester&apos;s email</Label>
+                <Input
+                  id="invite-email"
+                  type="email"
+                  placeholder="tester@example.com"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  autoFocus
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  An invite email with login credentials will be sent. They will be added to your projects after their first login.
+                </p>
+              </div>
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              <div className="flex justify-end gap-3 pt-2">
+                <Button type="button" variant="outline" onClick={closeInviteDialog}>Cancel</Button>
+                <Button type="submit" className="bg-primary hover:bg-primary/90" disabled={inviting}>
+                  {inviting ? "Sending…" : "Send Invite"}
+                </Button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Tester Confirmation Dialog */}
+      <Dialog
+        open={deleteConfirm.open}
+        onOpenChange={(o) => !deleting && setDeleteConfirm({ open: o, projectId: "", member: null })}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete tester account?</DialogTitle>
+          </DialogHeader>
+          <div className="mt-1 space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-destructive/10 rounded-xl flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-destructive" />
+              </div>
+              <div>
+                <p className="font-semibold text-foreground text-sm">
+                  {deleteConfirm.member?.name}{" "}
+                  <span className="font-normal text-muted-foreground">({deleteConfirm.member?.email})</span>
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  This will permanently delete their account, remove them from all projects, and cancel any pending invites. Their email will be freed for re-invite or new registration.
+                </p>
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Bugs they reported will be kept.
+                </p>
+              </div>
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" onClick={() => setInviteDialog({ open: false, projectId: null })}>
+            <div className="flex justify-end gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setDeleteConfirm({ open: false, projectId: "", member: null })}
+                disabled={deleting}
+              >
                 Cancel
               </Button>
-              <Button type="submit" className="bg-primary hover:bg-primary/90" disabled={inviting}>
-                {inviting ? "Sending…" : "Send Invite"}
+              <Button
+                variant="outline"
+                className="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                onClick={confirmDelete}
+                disabled={deleting}
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                {deleting ? "Deleting…" : "Delete Account"}
               </Button>
             </div>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

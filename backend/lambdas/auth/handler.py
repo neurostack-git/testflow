@@ -50,6 +50,17 @@ def invite_tester(event: dict, admin_sub: str, admin_role: str) -> dict:
     if not proj:
         return response(404, {"error": "Project not found"})
 
+    # Get all admin's project IDs (needed for both flows below)
+    all_admin_projects = table.query(
+        IndexName="GSI1",
+        KeyConditionExpression=Key("GSI1PK").eq(f"ADMIN#{admin_sub}"),
+    ).get("Items", [])
+    admin_project_ids = {
+        item.get("projectId")
+        for item in all_admin_projects
+        if item.get("SK") == "METADATA" and item.get("projectId")
+    }
+
     try:
         cognito_resp = cognito.admin_create_user(
             UserPoolId=USER_POOL_ID,
@@ -63,69 +74,72 @@ def invite_tester(event: dict, admin_sub: str, admin_role: str) -> dict:
         )
         user_attrs = {a["Name"]: a["Value"] for a in cognito_resp["User"]["Attributes"]}
         tester_sub = user_attrs["sub"]
+
+        # New user — store pending invites; PostAuthentication trigger will
+        # convert these to real memberships when the tester first logs in.
+        now = datetime.now(timezone.utc).isoformat()
+        for pid in admin_project_ids:
+            try:
+                table.put_item(
+                    Item={
+                        "PK": f"USER#{tester_sub}",
+                        "SK": f"PENDING#{pid}",
+                        "projectId": pid,
+                        "email": email,
+                        "invitedBy": admin_sub,
+                        "invitedAt": now,
+                    },
+                    ConditionExpression="attribute_not_exists(SK)",
+                )
+            except Exception:
+                pass
+
+        return response(200, {"message": "Tester invited successfully", "testerId": tester_sub})
+
     except ClientError as e:
-        if e.response["Error"]["Code"] == "UsernameExistsException":
-            user_data = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=email)
-            user_attrs = {a["Name"]: a["Value"] for a in user_data["UserAttributes"]}
-            if user_attrs.get("custom:role") == "admin":
-                return response(400, {"error": "This email is already registered as an admin on another account."})
-            tester_sub = user_attrs["sub"]
-        else:
+        if e.response["Error"]["Code"] != "UsernameExistsException":
             raise
 
-    tester_id = str(tester_sub)
+        # Email already exists in Cognito — figure out what to do
+        user_data = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=email)
+        user_status = user_data.get("UserStatus", "")
+        user_attrs = {a["Name"]: a["Value"] for a in user_data["UserAttributes"]}
+        user_role_attr = user_attrs.get("custom:role", "")
+        tester_sub = user_attrs.get("sub", "")
 
-    # Check if already a member of any of this admin's projects
-    all_admin_projects = table.query(
-        IndexName="GSI1",
-        KeyConditionExpression=Key("GSI1PK").eq(f"ADMIN#{admin_sub}"),
-    ).get("Items", [])
-    admin_project_ids = {
-        item.get("projectId")
-        for item in all_admin_projects
-        if item.get("SK") == "METADATA" and item.get("projectId")
-    }
+        if user_role_attr == "admin":
+            return response(400, {"error": "Can't send invite. This email is registered as a developer account."})
 
-    if any(
-        table.get_item(Key={"PK": f"PROJECT#{pid}", "SK": f"MEMBER#{tester_id}"}).get("Item")
-        for pid in admin_project_ids
-    ):
-        return response(400, {"error": "This tester is already a member of your organisation."})
+        if user_status == "FORCE_CHANGE_PASSWORD":
+            return response(400, {"error": "Can't send invite. An invite has already been sent to this email and is pending acceptance."})
 
-    # Write user profile if not exists
-    try:
-        table.put_item(
-            Item={
-                "PK": f"USER#{tester_id}",
-                "SK": "PROFILE",
-                "email": email,
-                "role": "tester",
-                "name": email.split("@")[0],
-                "phone": "",
-            },
-            ConditionExpression="attribute_not_exists(PK)",
+        # CONFIRMED tester — check if already a member
+        already_member = any(
+            table.get_item(Key={"PK": f"PROJECT#{pid}", "SK": f"MEMBER#{tester_sub}"}).get("Item")
+            for pid in admin_project_ids
         )
-    except ClientError as e:
-        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
-            raise
+        if already_member:
+            return response(400, {"error": "This tester is already a member of your organisation."})
 
-    # Add tester to ALL admin's existing projects
-    now = datetime.now(timezone.utc).isoformat()
-    for pid in admin_project_ids:
-        try:
-            table.put_item(
-                Item={
-                    "PK": f"PROJECT#{pid}",
-                    "SK": f"MEMBER#{tester_id}",
-                    "email": email,
-                    "role": "tester",
-                    "joinedAt": now,
-                    "GSI1PK": f"USER#{tester_id}",
-                    "GSI1SK": f"PROJECT#{pid}",
-                },
-                ConditionExpression="attribute_not_exists(SK)",
-            )
-        except Exception:
-            pass
+        # CONFIRMED tester not yet in any admin project — add them directly
+        # (they're already confirmed so no pending flow needed)
+        now = datetime.now(timezone.utc).isoformat()
+        for pid in admin_project_ids:
+            try:
+                table.put_item(
+                    Item={
+                        "PK": f"PROJECT#{pid}",
+                        "SK": f"MEMBER#{tester_sub}",
+                        "email": email,
+                        "role": "tester",
+                        "joinedAt": now,
+                        "GSI1PK": f"USER#{tester_sub}",
+                        "GSI1SK": f"PROJECT#{pid}",
+                    },
+                    ConditionExpression="attribute_not_exists(SK)",
+                )
+            except Exception:
+                pass
 
-    return response(200, {"message": "Tester invited", "testerId": tester_id})
+        return response(400, {"error": "Can't send invite. This user is already a TestFlow user."})
+

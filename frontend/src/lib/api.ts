@@ -134,6 +134,29 @@ export function uploadToS3WithProgress(
   });
 }
 
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
+export const chatApi = {
+  history: (projectId: string, cursor?: string) =>
+    request<{ messages: ChatMessage[]; nextCursor: string | null }>(
+      `/projects/${projectId}/chat/history${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
+  clearHistory: (projectId: string) =>
+    request<{ deleted: number }>(`/projects/${projectId}/chat/history`, { method: "DELETE" }),
+  members: (projectId: string) =>
+    request<{ members: ChatMember[] }>(`/projects/${projectId}/chat/members`),
+};
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+
+export const notificationsApi = {
+  list: () => request<{ notifications: AppNotification[]; unreadCount: number }>("/notifications"),
+  markRead: (notifId: string) =>
+    request(`/notifications/${notifId}/read`, { method: "PATCH" }),
+  markAllRead: () => request("/notifications/read-all", { method: "PATCH" }),
+  clearAll: () => request("/notifications", { method: "DELETE" }),
+};
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 export const authApi = {
@@ -246,4 +269,33 @@ export interface SaveReportPayload {
   s3Key: string;
   filename: string;
   contentType: string;
+}
+
+export interface ChatMessage {
+  messageId: string;
+  projectId: string;
+  senderSub: string;
+  senderName: string;
+  senderRole: "admin" | "tester";
+  content: string;
+  mentions: string[];
+  createdAt: string;
+}
+
+export interface ChatMember {
+  sub: string;
+  name: string;
+  role: "admin" | "tester";
+}
+
+export interface AppNotification {
+  notifId: string;
+  SK: string;
+  type: "mention" | "message";
+  projectId: string;
+  projectTitle: string;
+  fromName: string;
+  content: string;
+  read: boolean;
+  createdAt: string;
 }

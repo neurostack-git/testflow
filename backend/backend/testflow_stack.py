@@ -84,28 +84,67 @@ class TestflowStack(Stack):
                 "phone_number": cognito.StringAttribute(mutable=True),
             },
             user_invitation=cognito.UserInvitationConfig(
-                email_subject="You've been invited to TestFlow",
+                email_subject="You've been invited to TestFlow 🐛",
                 email_body=f"""
 <html>
-<body style="font-family:sans-serif;color:#1a1a1a;margin:0;padding:0;">
-  <div style="max-width:520px;margin:32px auto;padding:32px 24px;border:1px solid #e5e7eb;border-radius:12px;">
-    <div style="margin-bottom:24px;">
-      <span style="font-size:20px;font-weight:800;color:#f97316;">TestFlow</span>
+<body style="margin:0;padding:0;background-color:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:540px;margin:48px auto;padding:0 20px 48px;">
+
+    <!-- Logo -->
+    <div style="text-align:center;margin-bottom:32px;">
+      <img src="{app_url}/logo.svg" alt="TestFlow" width="56" height="56"
+           style="border-radius:14px;display:inline-block;" />
+      <div style="font-size:26px;font-weight:800;color:#f97316;margin-top:10px;letter-spacing:-0.5px;">TestFlow</div>
+      <div style="font-size:13px;color:#9ca3af;margin-top:2px;">Bug Reporting &amp; Tracking</div>
     </div>
-    <h2 style="font-size:18px;font-weight:700;margin:0 0 8px;">You've been invited!</h2>
-    <p style="color:#555;margin:0 0 24px;">You've been added as a tester on TestFlow — a bug reporting and tracking tool.</p>
-    <div style="background:#fff7ed;border-left:3px solid #f97316;padding:16px;border-radius:8px;margin-bottom:24px;">
-      <p style="margin:0 0 8px;font-size:13px;color:#555;">Your login credentials</p>
-      <p style="margin:0 0 4px;"><strong>Email:</strong> {{username}}</p>
-      <p style="margin:0;"><strong>Temporary password:</strong> {{####}}</p>
+
+    <!-- Card -->
+    <div style="background:#ffffff;border-radius:20px;padding:40px 36px;box-shadow:0 2px 8px rgba(0,0,0,0.06),0 12px 32px rgba(249,115,22,0.07);">
+
+      <!-- Badge -->
+      <div style="display:inline-block;background:#fff7ed;border:1px solid #fed7aa;border-radius:100px;padding:4px 14px;margin-bottom:20px;">
+        <span style="font-size:12px;font-weight:600;color:#ea580c;letter-spacing:0.03em;">&#x1F4E8; NEW INVITATION</span>
+      </div>
+
+      <h1 style="font-size:22px;font-weight:800;color:#111827;margin:0 0 10px;letter-spacing:-0.4px;">You've been invited!</h1>
+      <p style="font-size:15px;color:#6b7280;margin:0 0 28px;line-height:1.7;">
+        You've been added as a <strong style="color:#f97316;">Tester</strong> on TestFlow &mdash;
+        a collaborative platform for bug reporting, tracking, and communication.
+      </p>
+
+      <!-- Divider -->
+      <div style="height:1px;background:linear-gradient(to right,#f97316,#fed7aa,transparent);margin-bottom:28px;border-radius:1px;"></div>
+
+      <!-- Credentials -->
+      <div style="background:#fff7ed;border-radius:12px;padding:20px 24px;margin-bottom:32px;">
+        <p style="margin:0 0 12px;font-size:11px;font-weight:700;color:#9a3412;text-transform:uppercase;letter-spacing:0.08em;">Your login credentials</p>
+        <table style="border-collapse:collapse;width:100%;">
+          <tr>
+            <td style="font-size:13px;color:#6b7280;padding:4px 0;width:120px;">Email</td>
+            <td style="font-size:14px;color:#111827;font-weight:600;padding:4px 0;">{{username}}</td>
+          </tr>
+          <tr>
+            <td style="font-size:13px;color:#6b7280;padding:4px 0;">Temp password</td>
+            <td style="font-size:14px;color:#111827;font-weight:600;padding:4px 0;font-family:'Courier New',Courier,monospace;letter-spacing:0.05em;">{{####}}</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- CTA Button -->
+      <a href="{app_url}/login"
+         style="display:block;background:linear-gradient(135deg,#f97316 0%,#ea6c0a 100%);color:#ffffff;text-decoration:none;padding:15px 32px;border-radius:12px;font-weight:700;font-size:15px;text-align:center;letter-spacing:-0.2px;box-shadow:0 4px 14px rgba(249,115,22,0.4);">
+        Sign in to TestFlow &rarr;
+      </a>
+
+      <p style="font-size:12px;color:#9ca3af;text-align:center;margin:20px 0 0;line-height:1.7;">
+        You'll be asked to set a new password on first login.<br/>
+        This invitation expires in <strong style="color:#6b7280;">7 days</strong>.
+      </p>
     </div>
-    <a href="{app_url}/login"
-       style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:14px;">
-      Sign in to TestFlow
-    </a>
-    <p style="color:#888;font-size:12px;margin-top:24px;">
-      You'll be asked to set a new password on your first login.<br>
-      This invitation expires in 7 days.
+
+    <!-- Footer -->
+    <p style="font-size:12px;color:#d1d5db;text-align:center;margin-top:28px;line-height:1.6;">
+      &copy; 2026 TestFlow &nbsp;&bull;&nbsp; If you weren't expecting this, you can safely ignore it.
     </p>
   </div>
 </body>
@@ -189,9 +228,27 @@ class TestflowStack(Stack):
             environment=lambda_env,
         )
 
+        # post_auth_fn must NOT use lambda_env (which contains user_pool.user_pool_id)
+        # because it is also attached as a Cognito trigger — that would create a circular
+        # CloudFormation dependency.  It only needs TABLE_NAME.
+        post_auth_fn = lambda_.Function(
+            self, "PostAuthFn",
+            **lambda_defaults,
+            code=lambda_.Code.from_asset("lambdas/post_auth"),
+            handler="handler.lambda_handler",
+            environment={"TABLE_NAME": table.table_name},
+        )
+
         # ── IAM permissions ────────────────────────────────────────────────
         table.grant_read_write_data(auth_fn)
+        table.grant_read_write_data(post_auth_fn)
         table.grant_read_write_data(projects_fn)
+
+        # Attach PostAuthentication trigger — fires after every successful login
+        user_pool.add_trigger(
+            cognito.UserPoolOperation.POST_AUTHENTICATION,
+            post_auth_fn,
+        )
         table.grant_read_write_data(bugs_fn)
         table.grant_read_write_data(users_fn)
         table.grant_read_data(notifications_fn)
@@ -230,6 +287,14 @@ class TestflowStack(Stack):
             )
         )
 
+        # Allow projects Lambda to delete Cognito users (full tester removal)
+        projects_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["cognito-idp:AdminDeleteUser"],
+                resources=[user_pool.user_pool_arn],
+            )
+        )
+
         # Allow users Lambda to update Cognito attributes and send SMS OTPs
         users_fn.add_to_role_policy(
             iam.PolicyStatement(
@@ -252,6 +317,75 @@ class TestflowStack(Stack):
             )
         )
         bugs_fn.add_environment("NOTIFICATIONS_FN_ARN", notifications_fn.function_arn)
+
+        # ── Chat Lambdas ───────────────────────────────────────────────────
+        chat_fn = lambda_.Function(
+            self, "ChatFn",
+            **lambda_defaults,
+            code=lambda_.Code.from_asset("lambdas/chat"),
+            handler="handler.lambda_handler",
+            environment=lambda_env,
+        )
+        table.grant_read_write_data(chat_fn)
+
+        ws_chat_fn = lambda_.Function(
+            self, "WsChatFn",
+            **lambda_defaults,
+            code=lambda_.Code.from_asset("lambdas/ws_chat"),
+            handler="handler.lambda_handler",
+            environment={**lambda_env},  # WS_API_ENDPOINT added after WS API is created
+        )
+        table.grant_read_write_data(ws_chat_fn)
+
+        ws_chat_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["cognito-idp:GetUser"],
+                resources=["*"],
+            )
+        )
+
+        # ── WebSocket API ──────────────────────────────────────────────────
+        ws_api = apigwv2.WebSocketApi(
+            self,
+            "TestflowWsApi",
+            api_name="testflow-ws-api",
+        )
+
+        ws_stage = apigwv2.WebSocketStage(
+            self,
+            "WsProdStage",
+            web_socket_api=ws_api,
+            stage_name="prod",
+            auto_deploy=True,
+        )
+
+        ws_api.add_route(
+            "$connect",
+            integration=integrations.WebSocketLambdaIntegration("WsConnect", ws_chat_fn),
+        )
+        ws_api.add_route(
+            "$disconnect",
+            integration=integrations.WebSocketLambdaIntegration("WsDisconnect", ws_chat_fn),
+        )
+        ws_api.add_route(
+            "sendMessage",
+            integration=integrations.WebSocketLambdaIntegration("WsSendMessage", ws_chat_fn),
+        )
+        ws_api.add_route(
+            "typing",
+            integration=integrations.WebSocketLambdaIntegration("WsTyping", ws_chat_fn),
+        )
+
+        # Management endpoint for post_to_connection broadcasts
+        ws_mgmt_endpoint = f"https://{ws_api.api_id}.execute-api.{self.region}.amazonaws.com/prod"
+        ws_chat_fn.add_environment("WS_API_ENDPOINT", ws_mgmt_endpoint)
+
+        ws_chat_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["execute-api:ManageConnections"],
+                resources=[f"arn:aws:execute-api:{self.region}:{self.account}:{ws_api.api_id}/*"],
+            )
+        )
 
         # ── HTTP API Gateway ───────────────────────────────────────────────
         http_api = apigwv2.HttpApi(
@@ -318,9 +452,17 @@ class TestflowStack(Stack):
         add_routes("/projects/{projectId}/reports", projects_fn, [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST])
         add_routes("/projects/{projectId}/reports/{reportId}", projects_fn, [apigwv2.HttpMethod.DELETE])
 
+        # Chat (HTTP: history, members, notifications)
+        add_routes("/projects/{projectId}/chat/history", chat_fn, [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.DELETE])
+        add_routes("/projects/{projectId}/chat/members", chat_fn, [apigwv2.HttpMethod.GET])
+        add_routes("/notifications", chat_fn, [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.DELETE])
+        add_routes("/notifications/{notifId}/read", chat_fn, [apigwv2.HttpMethod.PATCH])
+        add_routes("/notifications/read-all", chat_fn, [apigwv2.HttpMethod.PATCH])
+
         # ── Outputs ────────────────────────────────────────────────────────
         CfnOutput(self, "ApiUrl", value=http_api.api_endpoint)
         CfnOutput(self, "UserPoolId", value=user_pool.user_pool_id)
         CfnOutput(self, "UserPoolClientId", value=user_pool_client.user_pool_client_id)
         CfnOutput(self, "BucketName", value=bucket.bucket_name)
         CfnOutput(self, "TableName", value=table.table_name)
+        CfnOutput(self, "WsApiUrl", value=ws_stage.url)

@@ -9,9 +9,11 @@ from botocore.config import Config
 dynamodb = boto3.resource("dynamodb")
 TABLE_NAME = os.environ["TABLE_NAME"]
 table = dynamodb.Table(TABLE_NAME)
+cognito = boto3.client("cognito-idp")
 
 s3 = boto3.client("s3", config=Config(signature_version="s3v4"))
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
+USER_POOL_ID = os.environ.get("USER_POOL_ID", "")
 
 
 def response(status: int, body) -> dict:
@@ -349,10 +351,47 @@ def remove_member(project_id: str, member_id: str, user_sub: str, user_role: str
     if not proj:
         return response(404, {"error": "Project not found"})
 
-    table.delete_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"MEMBER#{member_id}"})
-    table.delete_item(Key={"PK": f"USER#{member_id}", "SK": f"PROJECT#{project_id}"})
+    # Get tester email from membership record (needed for Cognito deletion)
+    membership = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"MEMBER#{member_id}"}).get("Item")
+    if not membership:
+        return response(404, {"error": "Member not found"})
+    tester_email = membership.get("email", "")
 
-    return response(200, {"message": "Member removed"})
+    # 1. Find ALL projects this tester belongs to via GSI1
+    gsi_result = table.query(
+        IndexName="GSI1",
+        KeyConditionExpression=Key("GSI1PK").eq(f"USER#{member_id}") & Key("GSI1SK").begins_with("PROJECT#"),
+    )
+    all_project_ids = [item["GSI1SK"].replace("PROJECT#", "") for item in gsi_result.get("Items", [])]
+
+    # 2. Delete all project memberships (both directions) + profile in one batch
+    with table.batch_writer() as batch:
+        for pid in all_project_ids:
+            batch.delete_item(Key={"PK": f"PROJECT#{pid}", "SK": f"MEMBER#{member_id}"})
+            batch.delete_item(Key={"PK": f"USER#{member_id}", "SK": f"PROJECT#{pid}"})
+        batch.delete_item(Key={"PK": f"USER#{member_id}", "SK": "PROFILE"})
+
+    # 3. Delete all notifications for this tester
+    notif_result = table.query(
+        KeyConditionExpression=Key("PK").eq(f"USER#{member_id}") & Key("SK").begins_with("NOTIF#"),
+        ProjectionExpression="PK, SK",
+    )
+    notif_items = notif_result.get("Items", [])
+    if notif_items:
+        with table.batch_writer() as batch:
+            for item in notif_items:
+                batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+
+    # 4. Delete Cognito user — frees the email for re-invite or new registration
+    if tester_email and USER_POOL_ID:
+        try:
+            cognito.admin_delete_user(UserPoolId=USER_POOL_ID, Username=tester_email)
+        except cognito.exceptions.UserNotFoundException:
+            pass  # Already gone
+        except Exception:
+            pass  # Don't fail the request if Cognito cleanup fails
+
+    return response(200, {"message": "Tester deleted successfully"})
 
 
 def _check_project_access(project_id: str, user_sub: str, user_role: str) -> bool:
