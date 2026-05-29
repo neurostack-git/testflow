@@ -230,7 +230,7 @@ export default function ProjectDetailPage() {
         projectsApi.listReports(projectId),
       ]);
       setProject(proj);
-      setBugs(bugsRes.bugs);
+      setBugs([...bugsRes.bugs].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
       setReports(reportsRes.reports);
     } catch {
       setError("Failed to load project");
