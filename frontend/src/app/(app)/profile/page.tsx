@@ -77,7 +77,7 @@ export default function ProfilePage() {
         {/* Avatar + identity card */}
         <Card className="mb-5 overflow-hidden">
           {/* Header banner */}
-          <div className="relative h-32 overflow-hidden bg-gradient-to-br from-primary via-primary/95 to-orange-600">
+          <div className="relative h-32 overflow-hidden bg-gradient-to-br from-primary via-primary/95 to-orange-600 dark:from-neutral-800 dark:via-neutral-900 dark:to-black">
             <div className="absolute -top-8 -right-8 w-44 h-44 rounded-full bg-white/10" />
             <div className="absolute -bottom-12 right-28 w-32 h-32 rounded-full bg-white/[0.07]" />
             <div className="absolute top-4 right-52 w-14 h-14 rounded-full bg-white/10" />

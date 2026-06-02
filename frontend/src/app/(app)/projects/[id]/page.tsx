@@ -651,7 +651,7 @@ export default function ProjectDetailPage() {
             onClick: () => { setSummaryFilter(null); setTesterFilter(null); setActiveTab("All"); },
           },
           {
-            label: "Unsolved", value: unsolved, color: "text-orange-500",
+            label: "Unsolved", value: unsolved, color: "text-orange-500 dark:text-white",
             active: summaryFilter === "unsolved",
             onClick: () => { setSummaryFilter(summaryFilter === "unsolved" ? null : "unsolved"); setTesterFilter(null); setActiveTab("All"); },
           },
@@ -732,7 +732,7 @@ export default function ProjectDetailPage() {
                   {tab}
                   <span className={cn(
                     "inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none min-w-[18px]",
-                    isActive ? "bg-white/25 text-primary-foreground" : "bg-muted text-muted-foreground"
+                    isActive ? "bg-white/25 text-primary-foreground dark:bg-black/20" : "bg-muted text-muted-foreground"
                   )}>
                     {count}
                   </span>

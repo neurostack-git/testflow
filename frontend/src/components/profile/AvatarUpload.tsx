@@ -130,7 +130,7 @@ export function AvatarUpload({ avatarUrl, name, onAvatarChange }: AvatarUploadPr
     <>
       <div className="relative group w-20 h-20 shrink-0">
         {/* Avatar circle */}
-        <div className="w-20 h-20 rounded-full bg-white border-4 border-card shadow-lg shadow-primary/25 overflow-hidden flex items-center justify-center text-primary text-3xl font-extrabold">
+        <div className="w-20 h-20 rounded-full bg-white dark:bg-muted border-4 border-card shadow-lg shadow-primary/25 overflow-hidden flex items-center justify-center text-primary text-3xl font-extrabold">
           {avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={avatarUrl} alt={name} className="w-full h-full object-cover" />

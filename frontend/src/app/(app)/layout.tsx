@@ -55,7 +55,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           >
             <Menu className="w-5 h-5" />
           </button>
-          <img src="/logo.svg" alt="TestFlow" className="w-7 h-7 rounded-lg" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.svg" alt="TestFlow" className="w-7 h-7 rounded-lg block dark:hidden" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-mono.svg" alt="TestFlow" className="w-7 h-7 rounded-lg hidden dark:block" />
           <span className="font-bold text-foreground tracking-tight">TestFlow</span>
         </header>
 

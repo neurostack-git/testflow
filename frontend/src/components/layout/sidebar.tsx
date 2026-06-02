@@ -7,6 +7,7 @@ import { LayoutDashboard, Settings2, User, LogOut, Trash2, X } from "lucide-reac
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
 import { usersApi, attachmentsApi } from "@/lib/api";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 
 const adminNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -81,7 +82,10 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
       {/* Logo */}
       <div className="flex items-center justify-between px-5 py-5 border-b border-border">
         <div className="flex items-center gap-2.5">
-          <img src="/logo.svg" alt="TestFlow" className="w-8 h-8 rounded-lg" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.svg" alt="TestFlow" className="w-8 h-8 rounded-lg block dark:hidden" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-mono.svg" alt="TestFlow" className="w-8 h-8 rounded-lg hidden dark:block" />
           <span className="text-lg font-bold text-foreground tracking-tight">TestFlow</span>
         </div>
         <button
@@ -102,7 +106,7 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
             className={cn(
               "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150",
               pathname === href || pathname.startsWith(href + "/")
-                ? "bg-gradient-to-r from-primary to-primary/80 text-white shadow-sm shadow-primary/25"
+                ? "bg-gradient-to-r from-primary to-primary/80 text-white shadow-sm shadow-primary/25 dark:text-primary-foreground"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             )}
           >
@@ -129,12 +133,13 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
             <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
           </div>
         </Link>
+        <ThemeToggle />
         <Link
           href="/bin"
           className={cn(
             "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150",
             pathname === "/bin"
-              ? "bg-gradient-to-r from-primary to-primary/80 text-white shadow-sm shadow-primary/25"
+              ? "bg-gradient-to-r from-primary to-primary/80 text-white shadow-sm shadow-primary/25 dark:text-primary-foreground"
               : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           )}
         >
