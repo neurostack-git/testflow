@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useRef } from "react";
 import Cropper from "react-easy-crop";
 import type { Area } from "react-easy-crop";
-import { Camera, Trash2, ZoomIn, ZoomOut } from "lucide-react";
+import { Camera, Trash2, ZoomIn, ZoomOut, ImageUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -17,8 +17,13 @@ interface AvatarUploadProps {
 
 async function getCroppedBlob(imageSrc: string, pixelCrop: Area): Promise<Blob> {
   const image = new Image();
+  // Needed so we can crop an existing S3 image onto a canvas without tainting it
+  image.crossOrigin = "anonymous";
   image.src = imageSrc;
-  await new Promise<void>((res) => { image.onload = () => res(); });
+  await new Promise<void>((res, rej) => {
+    image.onload = () => res();
+    image.onerror = () => rej(new Error("Image load failed"));
+  });
 
   const canvas = document.createElement("canvas");
   canvas.width = 400;
@@ -50,6 +55,18 @@ export function AvatarUpload({ avatarUrl, name, onAvatarChange }: AvatarUploadPr
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
+
+  // Clicking the avatar: if a photo exists, open the editor to re-adjust it;
+  // otherwise jump straight to the file picker.
+  function handleAvatarClick() {
+    if (avatarUrl) {
+      setCropSrc(avatarUrl);
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
+    } else {
+      fileRef.current?.click();
+    }
+  }
 
   function openPicker() {
     fileRef.current?.click();
@@ -122,11 +139,11 @@ export function AvatarUpload({ avatarUrl, name, onAvatarChange }: AvatarUploadPr
           )}
         </div>
 
-        {/* Camera overlay — click to upload/edit */}
+        {/* Camera overlay — click to edit existing or upload new */}
         <button
-          onClick={openPicker}
+          onClick={handleAvatarClick}
           className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
-          title="Change photo"
+          title={avatarUrl ? "Adjust photo" : "Upload photo"}
         >
           <Camera className="w-6 h-6 text-white" />
         </button>
@@ -202,19 +219,31 @@ export function AvatarUpload({ avatarUrl, name, onAvatarChange }: AvatarUploadPr
 
             {error && <p className="text-sm text-destructive">{error}</p>}
 
-            <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setCropSrc(null)} disabled={uploading}>
-                Cancel
-              </Button>
+            <div className="flex items-center justify-between gap-3">
               <Button
-                className={cn("bg-primary hover:bg-primary/90 gap-2", uploading && "opacity-70")}
-                onClick={handleSave}
+                type="button"
+                variant="outline"
+                onClick={openPicker}
                 disabled={uploading}
+                className="gap-2"
               >
-                {uploading ? (
-                  <><div className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" /> Uploading…</>
-                ) : "Save Photo"}
+                <ImageUp className="w-4 h-4" />
+                Change photo
               </Button>
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => setCropSrc(null)} disabled={uploading}>
+                  Cancel
+                </Button>
+                <Button
+                  className={cn("bg-primary hover:bg-primary/90 gap-2", uploading && "opacity-70")}
+                  onClick={handleSave}
+                  disabled={uploading}
+                >
+                  {uploading ? (
+                    <><div className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" /> Uploading…</>
+                  ) : "Save Photo"}
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>

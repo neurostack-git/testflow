@@ -114,7 +114,10 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
 
       {/* User + Bin + Logout */}
       <div className="px-4 py-4 border-t border-border space-y-1">
-        <div className="flex items-center gap-3 px-3 py-2 mb-2">
+        <Link
+          href="/profile"
+          className="flex items-center gap-3 px-3 py-2 mb-2 rounded-lg hover:bg-accent transition-colors"
+        >
           <div className="w-8 h-8 rounded-full bg-primary/10 overflow-hidden flex items-center justify-center text-primary font-semibold text-sm shrink-0">
             {avatarUrl
               // eslint-disable-next-line @next/next/no-img-element
@@ -125,7 +128,7 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
             <p className="text-sm font-medium text-foreground truncate">{userName}</p>
             <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
           </div>
-        </div>
+        </Link>
         <Link
           href="/bin"
           className={cn(
