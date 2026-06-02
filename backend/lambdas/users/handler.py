@@ -4,14 +4,18 @@ import secrets
 import time
 import boto3
 from boto3.dynamodb.conditions import Key
+from botocore.config import Config
 from botocore.exceptions import ClientError
+from datetime import datetime, timezone
 
 dynamodb = boto3.resource("dynamodb")
 cognito = boto3.client("cognito-idp")
 sns = boto3.client("sns", region_name="ap-south-1")
+s3 = boto3.client("s3", config=Config(signature_version="s3v4"))
 
 TABLE_NAME = os.environ["TABLE_NAME"]
 USER_POOL_ID = os.environ["USER_POOL_ID"]
+BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
 table = dynamodb.Table(TABLE_NAME)
 
 OTP_TTL_SECONDS = 600  # 10 minutes
@@ -39,6 +43,12 @@ def lambda_handler(event: dict, context) -> dict:
         return send_phone_otp(event, user_sub)
     if route == "POST /users/me/phone/verify-otp":
         return verify_phone_otp(event, user_sub)
+    if route == "POST /users/me/avatar/presign":
+        return presign_avatar(user_sub)
+    if route == "PATCH /users/me/avatar":
+        return update_avatar(event, user_sub)
+    if route == "DELETE /users/me/avatar":
+        return delete_avatar(user_sub)
 
     return response(404, {"error": "Not found"})
 
@@ -179,3 +189,56 @@ def verify_phone_otp(event: dict, user_sub: str) -> dict:
     table.delete_item(Key={"PK": f"OTP#{user_sub}", "SK": "PHONE"})
 
     return response(200, {"message": "Phone verified and saved", "phone": phone})
+
+
+# ── Avatar ────────────────────────────────────────────────────────────────────
+
+def presign_avatar(user_sub: str) -> dict:
+    if not BUCKET_NAME:
+        return response(500, {"error": "Storage not configured"})
+    timestamp = int(datetime.now(timezone.utc).timestamp())
+    key = f"avatars/{user_sub}/{timestamp}.jpg"
+    presigned_url = s3.generate_presigned_url(
+        "put_object",
+        Params={"Bucket": BUCKET_NAME, "Key": key, "ContentType": "image/jpeg"},
+        ExpiresIn=300,
+    )
+    return response(200, {"presignedUrl": presigned_url, "s3Key": key})
+
+
+def update_avatar(event: dict, user_sub: str) -> dict:
+    body = json.loads(event.get("body") or "{}")
+    s3_key = body.get("s3Key", "").strip()
+    if not s3_key:
+        return response(400, {"error": "s3Key is required"})
+
+    # Delete old avatar from S3 if it exists
+    old = table.get_item(Key={"PK": f"USER#{user_sub}", "SK": "PROFILE"}).get("Item", {})
+    old_key = old.get("avatarKey")
+    if old_key and old_key != s3_key and BUCKET_NAME:
+        try:
+            s3.delete_object(Bucket=BUCKET_NAME, Key=old_key)
+        except Exception:
+            pass
+
+    table.update_item(
+        Key={"PK": f"USER#{user_sub}", "SK": "PROFILE"},
+        UpdateExpression="SET avatarKey = :k",
+        ExpressionAttributeValues={":k": s3_key},
+    )
+    return response(200, {"message": "Avatar updated", "avatarKey": s3_key})
+
+
+def delete_avatar(user_sub: str) -> dict:
+    item = table.get_item(Key={"PK": f"USER#{user_sub}", "SK": "PROFILE"}).get("Item", {})
+    s3_key = item.get("avatarKey")
+    if s3_key and BUCKET_NAME:
+        try:
+            s3.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+        except Exception:
+            pass
+    table.update_item(
+        Key={"PK": f"USER#{user_sub}", "SK": "PROFILE"},
+        UpdateExpression="REMOVE avatarKey",
+    )
+    return response(200, {"message": "Avatar deleted"})

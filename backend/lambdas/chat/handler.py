@@ -129,6 +129,7 @@ def get_chat_members(project_id: str, user_sub: str, user_role: str) -> dict:
             "sub": admin_sub,
             "name": admin_profile.get("name") or admin_profile.get("email", "").split("@")[0] or "Admin",
             "role": "admin",
+            "avatarKey": admin_profile.get("avatarKey", ""),
         })
 
     # Testers
@@ -150,6 +151,7 @@ def get_chat_members(project_id: str, user_sub: str, user_role: str) -> dict:
                 "sub": sub,
                 "name": profile.get("name") or item.get("email", "").split("@")[0] or sub[:8],
                 "role": "tester",
+                "avatarKey": profile.get("avatarKey", ""),
             })
 
     return resp(200, {"members": members})

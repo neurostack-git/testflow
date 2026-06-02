@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LayoutDashboard, Settings2, User, LogOut, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
+import { usersApi, attachmentsApi } from "@/lib/api";
 
 const adminNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -34,6 +35,18 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
   const { logout } = useAuth();
   const nav = role === "admin" ? adminNav : testerNav;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    usersApi.me().then(async (profile) => {
+      if (profile.avatarKey) {
+        const { url } = await attachmentsApi.viewUrl(profile.avatarKey, true);
+        setAvatarUrl(url);
+      } else {
+        setAvatarUrl(null);
+      }
+    }).catch(() => {});
+  }, [pathname]); // refresh on navigation so profile changes show quickly
 
   // Close sidebar when navigating (mobile)
   useEffect(() => {
@@ -102,8 +115,11 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
       {/* User + Bin + Logout */}
       <div className="px-4 py-4 border-t border-border space-y-1">
         <div className="flex items-center gap-3 px-3 py-2 mb-2">
-          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm shrink-0">
-            {userName.charAt(0).toUpperCase()}
+          <div className="w-8 h-8 rounded-full bg-primary/10 overflow-hidden flex items-center justify-center text-primary font-semibold text-sm shrink-0">
+            {avatarUrl
+              // eslint-disable-next-line @next/next/no-img-element
+              ? <img src={avatarUrl} alt={userName} className="w-full h-full object-cover" />
+              : userName.charAt(0).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-foreground truncate">{userName}</p>

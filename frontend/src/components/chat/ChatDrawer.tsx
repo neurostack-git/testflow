@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { X, Send, MessageCircle, Wifi, WifiOff, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useProjectChat } from "@/hooks/useProjectChat";
-import { chatApi, type ChatMember } from "@/lib/api";
+import { chatApi, attachmentsApi, type ChatMember } from "@/lib/api";
 
 interface ChatDrawerProps {
   projectId: string;
@@ -76,10 +76,25 @@ export function ChatDrawer({
   const [mentionHighlight, setMentionHighlight] = useState(0);
   const [clearConfirm, setClearConfirm] = useState(false);
   const [clearing, setClearing] = useState(false);
+  // Map of member sub → resolved avatar URL (presigned)
+  const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const avatarFetchedRef = useRef<Set<string>>(new Set());
+
+  // Resolve avatar URLs for members that have an avatarKey (once each)
+  useEffect(() => {
+    members.forEach((m) => {
+      if (m.avatarKey && !avatarFetchedRef.current.has(m.sub)) {
+        avatarFetchedRef.current.add(m.sub);
+        attachmentsApi.viewUrl(m.avatarKey, true)
+          .then(({ url }) => setAvatarUrls((prev) => ({ ...prev, [m.sub]: url })))
+          .catch(() => {});
+      }
+    });
+  }, [members]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -301,8 +316,11 @@ export function ChatDrawer({
               >
                 {!isOwn && (
                   <div className="flex items-center gap-1.5 px-1">
-                    <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-primary text-[10px] font-bold shrink-0">
-                      {msg.senderName.charAt(0).toUpperCase()}
+                    <div className="w-5 h-5 rounded-full bg-primary/10 overflow-hidden flex items-center justify-center text-primary text-[10px] font-bold shrink-0">
+                      {avatarUrls[msg.senderSub]
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={avatarUrls[msg.senderSub]} alt={msg.senderName} className="w-full h-full object-cover" />
+                        : msg.senderName.charAt(0).toUpperCase()}
                     </div>
                     <span className="text-[11px] text-muted-foreground font-medium">{msg.senderName}</span>
                   </div>
@@ -364,8 +382,11 @@ export function ChatDrawer({
                     : "hover:bg-muted/50 text-foreground"
                 )}
               >
-                <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold shrink-0">
-                  {member.name.charAt(0).toUpperCase()}
+                <div className="w-6 h-6 rounded-full bg-primary/10 overflow-hidden flex items-center justify-center text-primary text-xs font-bold shrink-0">
+                  {avatarUrls[member.sub]
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={avatarUrls[member.sub]} alt={member.name} className="w-full h-full object-cover" />
+                    : member.name.charAt(0).toUpperCase()}
                 </div>
                 <span className="font-medium">{member.name}</span>
                 <span className="text-xs text-muted-foreground ml-auto capitalize">{member.role}</span>

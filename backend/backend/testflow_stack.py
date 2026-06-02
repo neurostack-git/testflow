@@ -255,6 +255,9 @@ class TestflowStack(Stack):
 
         bucket.grant_put(attachments_fn)
         bucket.grant_read(attachments_fn)
+        bucket.grant_put(users_fn)
+        bucket.grant_read(users_fn)
+        bucket.grant_delete(users_fn)
 
         bucket.grant_delete(projects_fn)
         bucket.grant_delete(bugs_fn)
@@ -441,6 +444,8 @@ class TestflowStack(Stack):
         add_routes("/users/me", users_fn, [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PATCH])
         add_routes("/users/me/phone/send-otp", users_fn, [apigwv2.HttpMethod.POST])
         add_routes("/users/me/phone/verify-otp", users_fn, [apigwv2.HttpMethod.POST])
+        add_routes("/users/me/avatar/presign", users_fn, [apigwv2.HttpMethod.POST])
+        add_routes("/users/me/avatar", users_fn, [apigwv2.HttpMethod.PATCH, apigwv2.HttpMethod.DELETE])
 
         # Attachments - view URL
         add_routes("/attachments/view", attachments_fn, [apigwv2.HttpMethod.GET])

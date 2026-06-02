@@ -186,6 +186,15 @@ export const usersApi = {
       method: "POST",
       body: JSON.stringify({ otp }),
     }),
+  presignAvatar: () =>
+    request<{ presignedUrl: string; s3Key: string }>("/users/me/avatar/presign", { method: "POST" }),
+  updateAvatar: (s3Key: string) =>
+    request<{ avatarKey: string }>("/users/me/avatar", {
+      method: "PATCH",
+      body: JSON.stringify({ s3Key }),
+    }),
+  deleteAvatar: () =>
+    request("/users/me/avatar", { method: "DELETE" }),
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -253,6 +262,7 @@ export interface UserProfile {
   phone: string;
   role: "admin" | "tester";
   adminName?: string;
+  avatarKey?: string;
 }
 
 export interface ProjectReport {
@@ -286,6 +296,7 @@ export interface ChatMember {
   sub: string;
   name: string;
   role: "admin" | "tester";
+  avatarKey?: string;
 }
 
 export interface AppNotification {

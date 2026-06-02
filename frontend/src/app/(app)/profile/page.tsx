@@ -7,8 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { User, Mail, Shield, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { usersApi } from "@/lib/api";
+import { usersApi, attachmentsApi } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
+import { AvatarUpload } from "@/components/profile/AvatarUpload";
 
 export default function ProfilePage() {
   const { user, refresh } = useAuth();
@@ -18,10 +19,24 @@ export default function ProfilePage() {
   const [nameSaving, setNameSaving] = useState(false);
   const [nameError, setNameError] = useState("");
   const [adminName, setAdminName] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) setName(user.name);
   }, [user]);
+
+  // Load avatar URL
+  useEffect(() => {
+    if (!user) return;
+    usersApi.me().then(async (profile) => {
+      if (profile.avatarKey) {
+        try {
+          const { url } = await attachmentsApi.viewUrl(profile.avatarKey, true);
+          setAvatarUrl(url);
+        } catch { /* silent */ }
+      }
+    }).catch(() => {});
+  }, [user?.sub]);
 
   useEffect(() => {
     if (user?.role === "tester") {
@@ -73,9 +88,11 @@ export default function ProfilePage() {
           <div className="px-6 pb-5 -mt-10 relative z-10">
             <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
               <div className="flex items-end gap-4">
-                <div className="w-20 h-20 rounded-full bg-white border-4 border-card shadow-lg shadow-primary/25 flex items-center justify-center text-primary text-3xl font-extrabold shrink-0">
-                  {user.name.charAt(0).toUpperCase()}
-                </div>
+                <AvatarUpload
+                  avatarUrl={avatarUrl}
+                  name={user.name}
+                  onAvatarChange={(url) => setAvatarUrl(url)}
+                />
                 <div className="pb-1 min-w-0">
                   <h2 className="text-xl font-extrabold text-foreground tracking-tight leading-tight truncate">{user.name}</h2>
                   <p className="text-sm text-muted-foreground truncate">{user.email}</p>
