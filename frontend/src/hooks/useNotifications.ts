@@ -54,9 +54,10 @@ export function useNotifications(): UseNotificationsReturn {
       );
       setUnreadCount((c) => Math.max(0, c - 1));
     } catch {
-      // silent
+      // Re-sync with the server so the UI never diverges from server truth
+      refresh();
     }
-  }, []);
+  }, [refresh]);
 
   const markAllRead = useCallback(async () => {
     try {
@@ -64,9 +65,9 @@ export function useNotifications(): UseNotificationsReturn {
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
       setUnreadCount(0);
     } catch {
-      // silent
+      refresh();
     }
-  }, []);
+  }, [refresh]);
 
   const clearAll = useCallback(async () => {
     try {
@@ -74,9 +75,9 @@ export function useNotifications(): UseNotificationsReturn {
       setNotifications([]);
       setUnreadCount(0);
     } catch {
-      // silent
+      refresh();
     }
-  }, []);
+  }, [refresh]);
 
   return { notifications, unreadCount, loading, markRead, markAllRead, clearAll, refresh };
 }

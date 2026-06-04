@@ -94,11 +94,12 @@ export function AvatarUpload({ avatarUrl, name, onAvatarChange }: AvatarUploadPr
       const blob = await getCroppedBlob(cropSrc, croppedAreaPixels);
       const { presignedUrl, s3Key } = await usersApi.presignAvatar();
 
-      await fetch(presignedUrl, {
+      const putRes = await fetch(presignedUrl, {
         method: "PUT",
         body: blob,
         headers: { "Content-Type": "image/jpeg" },
       });
+      if (!putRes.ok) throw new Error("Upload to storage failed");
 
       await usersApi.updateAvatar(s3Key);
 

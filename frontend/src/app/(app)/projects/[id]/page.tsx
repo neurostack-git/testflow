@@ -19,8 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   ArrowLeft, Plus, ChevronDown, ChevronLeft, ChevronRight,
   FileText, Image, X, Upload, UserPlus, Pencil, Download,
-  Trash2, Eye, AlertTriangle, CircleDot, CheckCircle2,
-  BadgeCheck, Ban, Video, Info, Search, Check,
+  Trash2, Eye, AlertTriangle, Video, Info, Search, Check,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -31,53 +30,11 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { ChatDrawer } from "@/components/chat/ChatDrawer";
 import { MessageCircle } from "lucide-react";
-
-const STATUS_STYLES: Record<string, string> = {
-  Open:     "bg-blue-100 text-blue-700 hover:bg-blue-200",
-  Fixed:    "bg-green-100 text-green-700 hover:bg-green-200",
-  Closed:   "bg-purple-100 text-purple-700 hover:bg-purple-200",
-  Invalid:  "bg-red-100 text-red-600 hover:bg-red-200",
-  Verified: "bg-purple-100 text-purple-700 hover:bg-purple-200", // legacy alias
-  Reopen:   "bg-blue-100 text-blue-700 hover:bg-blue-200",       // legacy alias
-};
-
-const ALL_STATUSES: BugStatus[] = ["Open", "Fixed", "Closed", "Invalid"];
-
-const STATUS_ICONS: Record<string, React.FC<{ className?: string }>> = {
-  Open:     CircleDot,
-  Fixed:    CheckCircle2,
-  Closed:   BadgeCheck,
-  Invalid:  Ban,
-  Verified: BadgeCheck, // legacy alias
-  Reopen:   CircleDot,  // legacy alias
-};
-
-const STATUS_ICON_COLORS: Record<string, string> = {
-  Open:     "text-blue-600",
-  Fixed:    "text-green-600",
-  Closed:   "text-purple-600",
-  Invalid:  "text-red-500",
-  Verified: "text-purple-600", // legacy alias
-  Reopen:   "text-blue-600",   // legacy alias
-};
-
-const ADMIN_TRANSITIONS: Record<string, BugStatus[]> = {
-  Open:     ["Fixed", "Closed", "Invalid"],
-  Fixed:    ["Open", "Closed", "Invalid"],
-  Closed:   ["Open", "Fixed", "Invalid"],
-  Invalid:  ["Open", "Fixed", "Closed"],
-  Verified: ["Open", "Fixed", "Invalid"],         // legacy alias
-  Reopen:   ["Open", "Fixed", "Closed", "Invalid"], // legacy alias
-};
-
-const TESTER_TRANSITIONS: Record<string, BugStatus[]> = {
-  Open:     ["Closed"],
-  Fixed:    ["Closed", "Open"],
-  Closed:   ["Open"],
-  Invalid:  ["Closed", "Open"],
-  Verified: ["Open"],            // legacy alias
-  Reopen:   ["Closed"],          // legacy alias
-};
+import { trimName, displayFilename } from "@/lib/filenames";
+import {
+  ALL_STATUSES, STATUS_STYLES, STATUS_ICONS, STATUS_ICON_COLORS,
+  ADMIN_TRANSITIONS, TESTER_TRANSITIONS,
+} from "@/lib/bug-status";
 
 const REPORT_ACCEPT = ".md,.txt,.pdf,.docx,text/markdown,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const REPORT_CONTENT_TYPES: Record<string, string> = {
@@ -86,10 +43,6 @@ const REPORT_CONTENT_TYPES: Record<string, string> = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 };
-
-function trimName(name: string, max = 48): string {
-  return name.length > max ? name.slice(0, max) + "…" : name;
-}
 
 function getContentType(file: File): string {
   if (file.type) return file.type;
@@ -1242,7 +1195,7 @@ export default function ProjectDetailPage() {
                         className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border text-sm text-foreground hover:bg-muted/30 hover:border-primary/30 transition-colors group"
                       >
                         <Image className="w-4 h-4 text-primary shrink-0" />
-                        <span className="truncate flex-1 text-left">{trimName(key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop() || key)}</span>
+                        <span className="truncate flex-1 text-left">{trimName(displayFilename(key))}</span>
                         <span className="text-xs font-semibold text-primary shrink-0 group-hover:underline">View</span>
                       </button>
                     ))}
@@ -1258,7 +1211,7 @@ export default function ProjectDetailPage() {
                   </p>
                   <div className="space-y-1.5">
                     {(selectedBug.videos ?? []).map((key, i) => {
-                      const filename = key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop() || key;
+                      const filename = displayFilename(key);
                       return (
                         <button
                           key={i}
@@ -1289,7 +1242,7 @@ export default function ProjectDetailPage() {
                     {selectedBug.documents.map((key, i) => (
                       <div key={i} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border text-sm text-foreground">
                         <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
-                        <span className="truncate">{trimName(key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop() || key)}</span>
+                        <span className="truncate">{trimName(displayFilename(key))}</span>
                       </div>
                     ))}
                   </div>
@@ -1358,7 +1311,7 @@ export default function ProjectDetailPage() {
                         <div className="flex items-center gap-2 min-w-0">
                           <Image className="w-4 h-4 text-primary shrink-0" />
                           <span className="truncate text-sm">
-                            {trimName(key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop() || key)}
+                            {trimName(displayFilename(key))}
                           </span>
                         </div>
                         <button
@@ -1418,7 +1371,7 @@ export default function ProjectDetailPage() {
                         <div className="flex items-center gap-2 min-w-0">
                           <Video className="w-4 h-4 text-primary shrink-0" />
                           <span className="truncate text-sm">
-                            {trimName(key.split("/").pop()?.split("_").slice(1).join("_") || key.split("/").pop() || key)}
+                            {trimName(displayFilename(key))}
                           </span>
                         </div>
                         <button

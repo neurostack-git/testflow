@@ -76,6 +76,7 @@ export function ChatDrawer({
   const [mentionHighlight, setMentionHighlight] = useState(0);
   const [clearConfirm, setClearConfirm] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState(false);
   // Map of member sub → resolved avatar URL (presigned)
   const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
 
@@ -202,14 +203,16 @@ export function ChatDrawer({
 
   async function handleClear() {
     setClearing(true);
+    setClearError(false);
     try {
       await chatApi.clearHistory(projectId);
       clearMessages();
+      setClearConfirm(false);
     } catch {
-      // silent
+      // Keep the confirm open and show an error so the admin knows it failed
+      setClearError(true);
     } finally {
       setClearing(false);
-      setClearConfirm(false);
     }
   }
 
@@ -248,7 +251,9 @@ export function ChatDrawer({
             {currentUserRole === "admin" && (
               clearConfirm ? (
                 <div className="flex items-center gap-1">
-                  <span className="text-[11px] text-muted-foreground">Clear all?</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {clearError ? "Failed — retry?" : "Clear all?"}
+                  </span>
                   <button
                     onClick={handleClear}
                     disabled={clearing}
@@ -257,7 +262,7 @@ export function ChatDrawer({
                     {clearing ? "…" : "Yes"}
                   </button>
                   <button
-                    onClick={() => setClearConfirm(false)}
+                    onClick={() => { setClearConfirm(false); setClearError(false); }}
                     className="text-[11px] text-muted-foreground hover:underline"
                   >
                     No
