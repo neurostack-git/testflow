@@ -2,8 +2,6 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -15,11 +13,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  ArrowLeft, Plus, ChevronDown, ChevronLeft, ChevronRight,
-  FileText, Image, X, Upload, UserPlus, Pencil, Download,
-  Trash2, Eye, AlertTriangle, Video, Info, Search, Check,
+  ArrowLeft, Plus, ChevronDown,
+  FileText, Image, X, Upload, UserPlus, Download,
+  Trash2, Eye, Video, Info,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -35,6 +32,13 @@ import {
   ALL_STATUSES, STATUS_STYLES, STATUS_ICONS, STATUS_ICON_COLORS,
   ADMIN_TRANSITIONS, TESTER_TRANSITIONS,
 } from "@/lib/bug-status";
+import { StatusGuideDialog } from "@/components/projects/StatusGuideDialog";
+import { VideoPlayer } from "@/components/projects/VideoPlayer";
+import { DeleteBugDialog } from "@/components/projects/DeleteBugDialog";
+import { ReportViewer } from "@/components/projects/ReportViewer";
+import { Lightbox } from "@/components/projects/Lightbox";
+import { SummaryStats } from "@/components/projects/SummaryStats";
+import { BugTable } from "@/components/projects/BugTable";
 
 const REPORT_ACCEPT = ".md,.txt,.pdf,.docx,text/markdown,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const REPORT_CONTENT_TYPES: Record<string, string> = {
@@ -85,15 +89,8 @@ export default function ProjectDetailPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState("");
 
-  // Screenshot lightbox (carousel)
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [lightboxScreenshots, setLightboxScreenshots] = useState<string[]>([]);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  const [lightboxFilename, setLightboxFilename] = useState<string>("");
-  const [lightboxLoading, setLightboxLoading] = useState(false);
-  // Cache presigned URLs so navigating back doesn't re-fetch (URLs valid 1 hour)
-  const lightboxUrlCache = React.useRef<Record<string, { url: string; filename: string }>>({});
+  // Screenshot lightbox (carousel) — self-contained component owns fetch/cache/keys
+  const [lightbox, setLightbox] = useState<{ screenshots: string[]; index: number } | null>(null);
 
   // Video player
   const [videoPlayer, setVideoPlayer] = useState<{ url: string; filename: string } | null>(null);
@@ -137,42 +134,14 @@ export default function ProjectDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Status tab filter + search + summary filters
+  // Status tab + summary/tester filters (shared between SummaryStats and BugTable).
+  // The free-text search lives inside BugTable so typing doesn't re-render this page.
   const [activeTab, setActiveTab] = useState("All");
-  const [bugSearch, setBugSearch] = useState("");
   const [summaryFilter, setSummaryFilter] = useState<"unsolved" | "today" | null>(null);
   const [testerFilter, setTesterFilter] = useState<string | null>(null);
 
   const role = user?.role ?? "tester";
   const transitions = role === "admin" ? ADMIN_TRANSITIONS : TESTER_TRANSITIONS;
-
-  const TAB_KEYS = ["All", "Open", "Fixed", "Closed", "Invalid"] as const;
-  const tabCount = (tab: string) => {
-    if (tab === "All") return bugs.length;
-    if (tab === "Open") return bugs.filter(b => b.status === "Open" || (b.status as string) === "Reopen").length;
-    if (tab === "Closed") return bugs.filter(b => b.status === "Closed" || (b.status as string) === "Verified").length;
-    return bugs.filter(b => b.status === tab).length;
-  };
-  const todayStr = new Date().toDateString();
-  const tabFilteredBugs = activeTab === "All" ? bugs
-    : activeTab === "Open" ? bugs.filter(b => b.status === "Open" || (b.status as string) === "Reopen")
-    : activeTab === "Closed" ? bugs.filter(b => b.status === "Closed" || (b.status as string) === "Verified")
-    : bugs.filter(b => b.status === activeTab);
-  const summaryFiltered = summaryFilter === "unsolved"
-    ? tabFilteredBugs.filter(b => b.status === "Open" || b.status === "Fixed")
-    : summaryFilter === "today"
-    ? tabFilteredBugs.filter(b => new Date(b.createdAt).toDateString() === todayStr)
-    : tabFilteredBugs;
-  const testerFiltered = testerFilter
-    ? summaryFiltered.filter(b => (b.reporterName ?? b.reportedBy) === testerFilter)
-    : summaryFiltered;
-  const searchQuery = bugSearch.trim().toLowerCase();
-  const filteredBugs = searchQuery
-    ? testerFiltered.filter(b =>
-        b.title.toLowerCase().includes(searchQuery) ||
-        b.description.toLowerCase().includes(searchQuery)
-      )
-    : testerFiltered;
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -369,44 +338,7 @@ export default function ProjectDetailPage() {
     }
   }
 
-  // ── Screenshot lightbox (carousel) ──────────────────────────────────────
-  async function fetchLightboxUrl(key: string) {
-    if (lightboxUrlCache.current[key]) return lightboxUrlCache.current[key];
-    const result = await attachmentsApi.viewUrl(key);
-    lightboxUrlCache.current[key] = result;
-    return result;
-  }
-
-  async function openLightbox(screenshots: string[], index: number) {
-    setLightboxScreenshots(screenshots);
-    setLightboxIndex(index);
-    setLightboxOpen(true);
-    setLightboxUrl(null);
-    setLightboxLoading(true);
-    try {
-      const { url, filename } = await fetchLightboxUrl(screenshots[index]);
-      setLightboxUrl(url);
-      setLightboxFilename(filename);
-    } catch {
-      setLightboxOpen(false);
-    } finally {
-      setLightboxLoading(false);
-    }
-  }
-
-  async function navigateLightbox(newIndex: number) {
-    if (newIndex < 0 || newIndex >= lightboxScreenshots.length) return;
-    setLightboxIndex(newIndex);
-    setLightboxLoading(true);
-    try {
-      const { url, filename } = await fetchLightboxUrl(lightboxScreenshots[newIndex]);
-      setLightboxUrl(url);
-      setLightboxFilename(filename);
-    } catch {} finally {
-      setLightboxLoading(false);
-    }
-  }
-
+  // ── Video player ─────────────────────────────────────────────────────────
   async function openVideoPlayer(key: string) {
     setVideoPlayerLoading(key);
     try {
@@ -418,26 +350,6 @@ export default function ProjectDetailPage() {
       setVideoPlayerLoading(null);
     }
   }
-
-  function closeLightbox() {
-    setLightboxOpen(false);
-    setLightboxScreenshots([]);
-    setLightboxUrl(null);
-    setLightboxFilename("");
-    lightboxUrlCache.current = {};
-  }
-
-  useEffect(() => {
-    if (!lightboxOpen) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "ArrowLeft") navigateLightbox(lightboxIndex - 1);
-      else if (e.key === "ArrowRight") navigateLightbox(lightboxIndex + 1);
-      else if (e.key === "Escape") closeLightbox();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lightboxOpen, lightboxIndex, lightboxScreenshots]);
 
   // ── Invite tester ────────────────────────────────────────────────────────
   async function handleInvite(e: React.FormEvent) {
@@ -589,260 +501,35 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Summary stats */}
-      {bugs.length > 0 && (() => {
-        const unsolved = bugs.filter(b => b.status === "Open" || b.status === "Fixed").length;
-        const todayCount = bugs.filter(b => new Date(b.createdAt).toDateString() === todayStr).length;
-        const byPerson = bugs.reduce<Record<string, number>>((acc, b) => {
-          const name = b.reporterName ?? b.reportedBy;
-          acc[name] = (acc[name] ?? 0) + 1;
-          return acc;
-        }, {});
-        const statCards = [
-          {
-            label: "Total Bugs", value: bugs.length, color: "text-foreground",
-            active: !summaryFilter && !testerFilter && activeTab === "All",
-            onClick: () => { setSummaryFilter(null); setTesterFilter(null); setActiveTab("All"); },
-          },
-          {
-            label: "Unsolved", value: unsolved, color: "text-orange-500 dark:text-white",
-            active: summaryFilter === "unsolved",
-            onClick: () => { setSummaryFilter(summaryFilter === "unsolved" ? null : "unsolved"); setTesterFilter(null); setActiveTab("All"); },
-          },
-          {
-            label: "Today", value: todayCount, color: "text-blue-600",
-            active: summaryFilter === "today",
-            onClick: () => { setSummaryFilter(summaryFilter === "today" ? null : "today"); setTesterFilter(null); setActiveTab("All"); },
-          },
-        ];
-        return (
-          <div className="mb-5 ml-7 space-y-2">
-            {/* Stat cards row */}
-            <div className="flex flex-wrap gap-2">
-              {statCards.map(({ label, value, color, active, onClick }) => (
-                <button
-                  key={label}
-                  onClick={onClick}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-2 rounded-lg border text-left transition-colors",
-                    active
-                      ? "border-primary bg-primary/5"
-                      : "border-border bg-card hover:border-primary/40 hover:bg-muted/30"
-                  )}
-                >
-                  <span className={cn("text-lg font-bold leading-none", color)}>{value}</span>
-                  <span className="text-xs text-muted-foreground">{label}</span>
-                </button>
-              ))}
-            </div>
-            {/* Tester chips row */}
-            <div className="flex flex-wrap gap-1.5">
-              {Object.entries(byPerson).map(([name, count]) => {
-                const isActive = testerFilter === name;
-                return (
-                  <button
-                    key={name}
-                    onClick={() => { setTesterFilter(isActive ? null : name); setSummaryFilter(null); setActiveTab("All"); }}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
-                      isActive
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                    )}
-                  >
-                    {trimName(name, 20)}
-                    <span className={cn(
-                      "inline-flex items-center justify-center rounded-full w-4 h-4 text-[10px] font-bold",
-                      isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                    )}>{count}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
+      <SummaryStats
+        bugs={bugs}
+        summaryFilter={summaryFilter}
+        testerFilter={testerFilter}
+        activeTab={activeTab}
+        setSummaryFilter={setSummaryFilter}
+        setTesterFilter={setTesterFilter}
+        setActiveTab={setActiveTab}
+      />
 
       {error && <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg mb-4">{error}</p>}
 
       {/* Bugs table */}
-      <div className="border border-border rounded-xl overflow-hidden bg-card">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/20 gap-2">
-          <div className="flex items-center gap-1 overflow-x-auto min-w-0">
-            {TAB_KEYS.map((tab) => {
-              const count = tabCount(tab);
-              const isActive = activeTab === tab;
-              return (
-                <button
-                  key={tab}
-                  onClick={() => { setActiveTab(tab); setSummaryFilter(null); setTesterFilter(null); }}
-                  className={cn(
-                    "shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap",
-                    isActive
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                  )}
-                >
-                  {tab}
-                  <span className={cn(
-                    "inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none min-w-[18px]",
-                    isActive ? "bg-white/25 text-primary-foreground dark:bg-black/20" : "bg-muted text-muted-foreground"
-                  )}>
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <Button
-            size="sm"
-            onClick={openNewBug}
-            className={cn("shrink-0", role === "tester" ? "bg-primary hover:bg-primary/90 gap-1.5" : "gap-1.5")}
-            variant={role === "admin" ? "outline" : "default"}
-          >
-            <Plus className="w-3.5 h-3.5" />
-            {role === "tester" ? "Report Bug" : "Add Row"}
-          </Button>
-        </div>
-
-        <div className="px-3 py-2 border-b border-border">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Search by title or description…"
-              value={bugSearch}
-              onChange={(e) => setBugSearch(e.target.value)}
-              className="w-full h-8 pl-8 pr-3 text-sm bg-muted/40 border border-border rounded-md placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-colors"
-            />
-            {bugSearch && (
-              <button
-                onClick={() => setBugSearch("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/20">
-              <TableHead className="pl-5">Bug Title</TableHead>
-              <TableHead>Tester</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Screenshots</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="w-10" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredBugs.map((bug) => {
-              const isClosed = bug.status === "Closed" || (bug.status as string) === "Verified";
-              const isInvalid = bug.status === "Invalid";
-              return (
-              <TableRow
-                key={bug.bugId}
-                className="cursor-pointer hover:bg-muted/30 transition-colors"
-                onClick={() => openBug(bug)}
-              >
-                <TableCell className={cn("pl-5 font-medium", isClosed ? "line-through text-muted-foreground" : isInvalid ? "text-red-500" : "text-foreground")}>{bug.title}</TableCell>
-                <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-400" : "text-muted-foreground")}>{bug.reporterName ?? bug.reportedBy.slice(0, 8) + "…"}</TableCell>
-                <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-400" : "text-muted-foreground")}>
-                  {new Date(bug.createdAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
-                </TableCell>
-                <TableCell onClick={(e) => e.stopPropagation()}>
-                  {(bug.screenshots.length + bug.documents.length + (bug.videos?.length ?? 0)) > 0 ? (
-                    <div className={cn("flex items-center gap-1 text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-400" : "text-muted-foreground")}>
-                      <Image className="w-3.5 h-3.5" />
-                      {bug.screenshots.length + bug.documents.length + (bug.videos?.length ?? 0)}
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground/40 text-sm">—</span>
-                  )}
-                </TableCell>
-                <TableCell onClick={(e) => e.stopPropagation()}>
-                  {(() => {
-                    const validTransitions = transitions[bug.status] ?? [];
-                    const dropdownStatuses = ALL_STATUSES.includes(bug.status as BugStatus)
-                      ? ALL_STATUSES
-                      : [bug.status as BugStatus, ...ALL_STATUSES];
-                    return (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
-                          className={cn(
-                            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
-                            STATUS_STYLES[bug.status]
-                          )}
-                        >
-                          {(() => { const Icon = STATUS_ICONS[bug.status]; return <Icon className="w-3 h-3" />; })()}
-                          {bug.status}
-                          <ChevronDown className="w-3 h-3 opacity-60" />
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="w-44">
-                          {dropdownStatuses.map((s) => {
-                            const Icon = STATUS_ICONS[s];
-                            const isCurrent = s === bug.status;
-                            const isAllowed = validTransitions.includes(s);
-                            const isInvalidStatus = s === "Invalid";
-                            return (
-                              <DropdownMenuItem
-                                key={s}
-                                disabled={isCurrent || !isAllowed}
-                                onClick={() => isAllowed && handleStatusChange(bug.bugId, s)}
-                                className={cn("gap-2", isInvalidStatus && "text-red-500 focus:text-red-500")}
-                              >
-                                <Icon className={cn("w-3.5 h-3.5 shrink-0", isInvalidStatus ? "text-red-500" : STATUS_ICON_COLORS[s])} />
-                                <span className={isCurrent ? "font-semibold" : ""}>{s}</span>
-                                {isCurrent && <Check className="w-3 h-3 ml-auto opacity-70" />}
-                              </DropdownMenuItem>
-                            );
-                          })}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    );
-                  })()}
-                </TableCell>
-                <TableCell onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center gap-0.5">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); openBug(bug); }}
-                      className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                      title="View bug"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={(e) => openEditBug(e, bug)}
-                      className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                      title="Edit bug"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={(e) => handleDeleteBug(e, bug)}
-                      className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                      title="Delete bug"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-            {filteredBugs.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
-                  {searchQuery ? `No bugs match "${bugSearch}".` : activeTab === "All" ? "No bugs reported yet." : `No ${activeTab.toLowerCase()} bugs.`}
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-        </div>{/* /overflow-x-auto */}
-      </div>{/* /card */}
+      <BugTable
+        bugs={bugs}
+        role={role}
+        transitions={transitions}
+        activeTab={activeTab}
+        summaryFilter={summaryFilter}
+        testerFilter={testerFilter}
+        setActiveTab={setActiveTab}
+        setSummaryFilter={setSummaryFilter}
+        setTesterFilter={setTesterFilter}
+        onOpenBug={openBug}
+        onOpenNewBug={openNewBug}
+        onEditBug={openEditBug}
+        onDeleteBug={handleDeleteBug}
+        onStatusChange={handleStatusChange}
+      />
 
       {/* Reports section */}
       <div className="mt-8 border border-border rounded-xl overflow-hidden bg-card">
@@ -1191,7 +878,7 @@ export default function ProjectDetailPage() {
                       <button
                         key={i}
                         type="button"
-                        onClick={() => openLightbox(selectedBug.screenshots, i)}
+                        onClick={() => setLightbox({ screenshots: selectedBug.screenshots, index: i })}
                         className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border text-sm text-foreground hover:bg-muted/30 hover:border-primary/30 transition-colors group"
                       >
                         <Image className="w-4 h-4 text-primary shrink-0" />
@@ -1452,217 +1139,22 @@ export default function ProjectDetailPage() {
       </Dialog>
 
       {/* Delete Bug Confirmation Dialog */}
-      <Dialog open={deleteConfirm.open} onOpenChange={(o) => !deleting && setDeleteConfirm({ open: o, bug: o ? deleteConfirm.bug : null })}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete bug?</DialogTitle>
-          </DialogHeader>
-          <div className="mt-1 space-y-5">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-destructive/10 rounded-xl flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5 text-destructive" />
-              </div>
-              <div>
-                <p className="font-semibold text-foreground text-sm">{deleteConfirm.bug?.title}</p>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  This bug and all its screenshots will be permanently deleted. This cannot be undone.
-                </p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setDeleteConfirm({ open: false, bug: null })} disabled={deleting}>
-                Cancel
-              </Button>
-              <Button
-                variant="outline"
-                className="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
-                onClick={confirmDeleteBug}
-                disabled={deleting}
-              >
-                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                {deleting ? "Deleting…" : "Delete"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <DeleteBugDialog
+        open={deleteConfirm.open}
+        bug={deleteConfirm.bug}
+        deleting={deleting}
+        onOpenChange={(o) => !deleting && setDeleteConfirm({ open: o, bug: o ? deleteConfirm.bug : null })}
+        onConfirm={confirmDeleteBug}
+      />
 
       {/* Status Guide Dialog */}
-      <Dialog open={statusInfoOpen} onOpenChange={setStatusInfoOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Info className="w-4 h-4 text-muted-foreground" />
-              Bug Status Guide
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 mt-2">
-            {[
-              {
-                status: "Open" as BugStatus,
-                who: "Tester",
-                desc: "Tester has reported a bug that hasn't been fixed yet. The developer needs to investigate.",
-              },
-              {
-                status: "Fixed" as BugStatus,
-                who: "Developer",
-                desc: "Developer has fixed the bug and is asking the tester to verify the fix.",
-              },
-              {
-                status: "Closed" as BugStatus,
-                who: "Tester",
-                desc: "Tester has verified the fix and confirmed the bug is fully resolved.",
-              },
-              {
-                status: "Invalid" as BugStatus,
-                who: "Developer",
-                desc: "Developer has determined this is not a valid bug — cannot reproduce, out of scope, or working as intended.",
-              },
-            ].map(({ status, who, desc }) => {
-              const Icon = STATUS_ICONS[status] as React.FC<{ className?: string }>;
-              return (
-                <div key={status} className="flex items-start gap-3 p-3 rounded-lg border border-border">
-                  <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 mt-0.5", STATUS_STYLES[status])}>
-                    <Icon className="w-3 h-3" />
-                    {status}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-muted-foreground mb-0.5">Set by {who}</p>
-                    <p className="text-sm text-foreground leading-snug">{desc}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <StatusGuideDialog open={statusInfoOpen} onOpenChange={setStatusInfoOpen} />
 
       {/* Report Viewer */}
-      {reportViewer && createPortal(
-        <div
-          className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4"
-          onClick={() => setReportViewer(null)}
-        >
-          <div
-            className="bg-background rounded-xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
-              <div className="flex items-center gap-2 min-w-0">
-                <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
-                <span className="font-semibold text-sm text-foreground truncate">{reportViewer.filename}</span>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={reportViewer.url}
-                  download={reportViewer.filename}
-                  onClick={(e) => e.stopPropagation()}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-border text-foreground hover:bg-muted/40 transition-colors"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Download
-                </a>
-                <button
-                  onClick={() => setReportViewer(null)}
-                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 min-h-0 overflow-auto">
-              {reportViewer.textContent !== undefined ? (
-                (() => {
-                  const isMd = reportViewer.filename.toLowerCase().endsWith(".md");
-                  return isMd ? (
-                    <div className="max-w-4xl mx-auto px-8 py-6 text-sm leading-7 text-foreground">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          h1: ({ children }) => <h1 className="text-2xl font-bold mt-6 mb-4 pb-2 border-b border-border">{children}</h1>,
-                          h2: ({ children }) => <h2 className="text-xl font-bold mt-6 mb-3 pb-2 border-b border-border">{children}</h2>,
-                          h3: ({ children }) => <h3 className="text-lg font-semibold mt-5 mb-2">{children}</h3>,
-                          h4: ({ children }) => <h4 className="text-base font-semibold mt-4 mb-2">{children}</h4>,
-                          p: ({ children }) => <p className="mb-4">{children}</p>,
-                          pre: ({ children }) => <pre className="bg-muted rounded-lg p-4 overflow-x-auto mb-4 text-xs font-mono">{children}</pre>,
-                          code: ({ className, children }) => className
-                            ? <code className={cn("font-mono text-xs", className)}>{children}</code>
-                            : <code className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>,
-                          ul: ({ children }) => <ul className="mb-4 ml-5 list-disc space-y-1">{children}</ul>,
-                          ol: ({ children }) => <ol className="mb-4 ml-5 list-decimal space-y-1">{children}</ol>,
-                          li: ({ children }) => <li className="leading-7">{children}</li>,
-                          blockquote: ({ children }) => <blockquote className="border-l-4 border-border pl-4 text-muted-foreground my-4">{children}</blockquote>,
-                          a: ({ href, children }) => <a href={href} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">{children}</a>,
-                          table: ({ children }) => <div className="overflow-x-auto mb-4"><table className="w-full border-collapse border border-border text-sm">{children}</table></div>,
-                          thead: ({ children }) => <thead className="bg-muted">{children}</thead>,
-                          tr: ({ children }) => <tr className="border-b border-border">{children}</tr>,
-                          th: ({ children }) => <th className="px-3 py-2 text-left font-semibold border-r border-border last:border-r-0">{children}</th>,
-                          td: ({ children }) => <td className="px-3 py-2 border-r border-border last:border-r-0">{children}</td>,
-                          hr: () => <hr className="my-6 border-border" />,
-                          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                          em: ({ children }) => <em className="italic">{children}</em>,
-                        }}
-                      >
-                        {reportViewer.textContent}
-                      </ReactMarkdown>
-                    </div>
-                  ) : (
-                    <pre className="p-6 text-sm font-mono text-foreground whitespace-pre-wrap break-words">{reportViewer.textContent}</pre>
-                  );
-                })()
-              ) : reportViewer.contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? (
-                <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
-                  <FileText className="w-12 h-12 opacity-30" />
-                  <p className="text-sm">Preview not available for .docx files.</p>
-                  <a
-                    href={reportViewer.url}
-                    download={reportViewer.filename}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-                  >
-                    <Download className="w-4 h-4" />
-                    Download to view
-                  </a>
-                </div>
-              ) : (
-                <iframe
-                  src={reportViewer.url}
-                  title={reportViewer.filename}
-                  className="w-full h-full border-0"
-                />
-              )}
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      <ReportViewer viewer={reportViewer} onClose={() => setReportViewer(null)} />
 
       {/* Video Player */}
-      {videoPlayer && createPortal(
-        <div
-          className="fixed inset-0 z-[9999] bg-black/90 flex flex-col items-center justify-center p-4"
-          onClick={() => setVideoPlayer(null)}
-        >
-          <button
-            onClick={() => setVideoPlayer(null)}
-            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-          <div
-            className="flex flex-col items-center gap-3 w-full max-w-4xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-white/70 text-sm">{videoPlayer.filename}</p>
-            <video
-              src={videoPlayer.url}
-              controls
-              autoPlay
-              className="max-w-full max-h-[80vh] rounded-lg shadow-2xl"
-            />
-          </div>
-        </div>,
-        document.body
-      )}
+      <VideoPlayer video={videoPlayer} onClose={() => setVideoPlayer(null)} />
 
       {/* Floating chat bubble + drawer — portalled to body to escape tf-page-in transform stacking context */}
       {createPortal(
@@ -1692,78 +1184,13 @@ export default function ProjectDetailPage() {
         document.body
       )}
 
-      {/* Screenshot Lightbox (carousel) — portal to escape stacking context */}
-      {lightboxOpen && createPortal(
-        <div
-          className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/90"
-          onClick={closeLightbox}
-        >
-          {/* Close */}
-          <button
-            onClick={closeLightbox}
-            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
-          {/* Prev */}
-          {lightboxScreenshots.length > 1 && lightboxIndex > 0 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); navigateLightbox(lightboxIndex - 1); }}
-              className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
-            >
-              <ChevronLeft className="w-6 h-6" />
-            </button>
-          )}
-
-          {/* Next */}
-          {lightboxScreenshots.length > 1 && lightboxIndex < lightboxScreenshots.length - 1 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); navigateLightbox(lightboxIndex + 1); }}
-              className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
-            >
-              <ChevronRight className="w-6 h-6" />
-            </button>
-          )}
-
-          {/* Image area */}
-          <div
-            className="flex items-center justify-center w-full h-full p-16"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {lightboxLoading ? (
-              <div className="w-8 h-8 rounded-full border-2 border-white border-t-transparent animate-spin" />
-            ) : lightboxUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={lightboxUrl}
-                alt={lightboxFilename}
-                className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
-              />
-            ) : null}
-          </div>
-
-          {/* Counter + Download */}
-          <div className="absolute bottom-6 flex items-center gap-4">
-            {lightboxScreenshots.length > 1 && (
-              <span className="text-white/60 text-sm">{lightboxIndex + 1} / {lightboxScreenshots.length}</span>
-            )}
-            {lightboxUrl && (
-              <a
-                href={lightboxUrl}
-                download={lightboxFilename}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                Download
-              </a>
-            )}
-          </div>
-        </div>,
-        document.body
+      {/* Screenshot Lightbox (carousel) */}
+      {lightbox && (
+        <Lightbox
+          screenshots={lightbox.screenshots}
+          startIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+        />
       )}
     </div>
   );
