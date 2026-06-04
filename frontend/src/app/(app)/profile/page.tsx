@@ -7,44 +7,21 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { User, Mail, Shield, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { usersApi, attachmentsApi } from "@/lib/api";
+import { usersApi } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { AvatarUpload } from "@/components/profile/AvatarUpload";
 
 export default function ProfilePage() {
-  const { user, refresh } = useAuth();
+  const { user, refresh, avatarUrl, adminName, setAvatarUrl } = useAuth();
 
   const [name, setName] = useState("");
   const [nameSaved, setNameSaved] = useState(false);
   const [nameSaving, setNameSaving] = useState(false);
   const [nameError, setNameError] = useState("");
-  const [adminName, setAdminName] = useState<string | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) setName(user.name);
   }, [user]);
-
-  // Load avatar URL
-  useEffect(() => {
-    if (!user) return;
-    usersApi.me().then(async (profile) => {
-      if (profile.avatarKey) {
-        try {
-          const { url } = await attachmentsApi.viewUrl(profile.avatarKey, true);
-          setAvatarUrl(url);
-        } catch { /* silent */ }
-      }
-    }).catch(() => {});
-  }, [user?.sub]);
-
-  useEffect(() => {
-    if (user?.role === "tester") {
-      usersApi.me().then((profile) => {
-        if (profile.adminName) setAdminName(profile.adminName);
-      }).catch(() => {});
-    }
-  }, [user?.role]);
 
   async function handleSaveName(e: React.FormEvent) {
     e.preventDefault();

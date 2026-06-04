@@ -2,11 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { LayoutDashboard, Settings2, User, LogOut, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
-import { usersApi, attachmentsApi } from "@/lib/api";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 
 const adminNav = [
@@ -33,21 +32,9 @@ interface SidebarProps {
 
 export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { logout } = useAuth();
+  const { logout, avatarUrl } = useAuth();
   const nav = role === "admin" ? adminNav : testerNav;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    usersApi.me().then(async (profile) => {
-      if (profile.avatarKey) {
-        const { url } = await attachmentsApi.viewUrl(profile.avatarKey, true);
-        setAvatarUrl(url);
-      } else {
-        setAvatarUrl(null);
-      }
-    }).catch(() => {});
-  }, [pathname]); // refresh on navigation so profile changes show quickly
 
   // Close sidebar when navigating (mobile)
   useEffect(() => {
