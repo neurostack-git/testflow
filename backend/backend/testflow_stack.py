@@ -30,6 +30,9 @@ class TestflowStack(Stack):
             sort_key=dynamodb.Attribute(name="SK", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=RemovalPolicy.RETAIN,
+            # Auto-expire ephemeral rows (WS connections, phone OTPs) that carry
+            # an `expiresAt` epoch-seconds attribute. Other items omit it and persist.
+            time_to_live_attribute="expiresAt",
         )
 
         # GSI1 — lets us query all projects a user belongs to

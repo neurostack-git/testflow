@@ -52,7 +52,8 @@ def _connect(event: dict, connection_id: str) -> dict:
     if not _check_access(project_id, user_sub, user_role):
         return {"statusCode": 403}
 
-    ttl = int((datetime.now(timezone.utc) + timedelta(hours=2)).timestamp())
+    # DynamoDB TTL attribute (epoch seconds) — auto-purges stale connection rows
+    expires_at = int((datetime.now(timezone.utc) + timedelta(hours=2)).timestamp())
 
     # WSCONN#<connId>/META — for fast lookup on message/disconnect
     table.put_item(Item={
@@ -63,7 +64,7 @@ def _connect(event: dict, connection_id: str) -> dict:
         "userSub": user_sub,
         "userName": user_name,
         "userRole": user_role,
-        "TTL": ttl,
+        "expiresAt": expires_at,
     })
 
     # PROJECT#<id>/WSCONN#<connId> — for broadcasting to all project members
@@ -73,7 +74,7 @@ def _connect(event: dict, connection_id: str) -> dict:
         "connectionId": connection_id,
         "userSub": user_sub,
         "userName": user_name,
-        "TTL": ttl,
+        "expiresAt": expires_at,
     })
 
     return {"statusCode": 200}

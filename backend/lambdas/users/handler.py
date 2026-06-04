@@ -130,14 +130,17 @@ def send_phone_otp(event: dict, user_sub: str) -> dict:
         return response(400, {"error": "phone is required"})
 
     otp = str(secrets.randbelow(1000000)).zfill(6)
-    ttl = int(time.time()) + OTP_TTL_SECONDS
+    # DynamoDB TTL attribute (epoch seconds) — auto-purges expired OTP rows.
+    # Note: the verify step below still enforces expiry in-app, since DynamoDB
+    # TTL deletion is eventual (can lag the timestamp by up to ~48h).
+    expires_at = int(time.time()) + OTP_TTL_SECONDS
 
     table.put_item(Item={
         "PK": f"OTP#{user_sub}",
         "SK": "PHONE",
         "otp": otp,
         "phone": phone,
-        "ttl": ttl,
+        "expiresAt": expires_at,
     })
 
     try:
@@ -160,7 +163,10 @@ def verify_phone_otp(event: dict, user_sub: str) -> dict:
     if not otp_item:
         return response(400, {"error": "No pending verification. Please request a new code."})
 
-    if otp_item.get("ttl", 0) < int(time.time()):
+    # Read new attribute, falling back to the legacy "ttl" for OTPs issued
+    # before the attribute rename (handles the deploy transition window).
+    otp_expiry = otp_item.get("expiresAt", otp_item.get("ttl", 0))
+    if otp_expiry < int(time.time()):
         return response(400, {"error": "Code has expired. Please request a new one."})
 
     if otp_item.get("otp") != otp:

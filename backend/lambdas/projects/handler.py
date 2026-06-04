@@ -364,25 +364,36 @@ def remove_member(project_id: str, member_id: str, user_sub: str, user_role: str
     )
     all_project_ids = [item["GSI1SK"].replace("PROJECT#", "") for item in gsi_result.get("Items", [])]
 
-    # 2. Delete all project memberships (both directions) + profile in one batch
-    with table.batch_writer() as batch:
-        for pid in all_project_ids:
-            batch.delete_item(Key={"PK": f"PROJECT#{pid}", "SK": f"MEMBER#{member_id}"})
-            batch.delete_item(Key={"PK": f"USER#{member_id}", "SK": f"PROJECT#{pid}"})
-        batch.delete_item(Key={"PK": f"USER#{member_id}", "SK": "PROFILE"})
+    # 2. Collect every DynamoDB key to remove: memberships (both directions),
+    #    profile, and all notifications.
+    delete_keys = []
+    for pid in all_project_ids:
+        delete_keys.append((f"PROJECT#{pid}", f"MEMBER#{member_id}"))
+        delete_keys.append((f"USER#{member_id}", f"PROJECT#{pid}"))
+    delete_keys.append((f"USER#{member_id}", "PROFILE"))
 
-    # 3. Delete all notifications for this tester
     notif_result = table.query(
         KeyConditionExpression=Key("PK").eq(f"USER#{member_id}") & Key("SK").begins_with("NOTIF#"),
         ProjectionExpression="PK, SK",
     )
-    notif_items = notif_result.get("Items", [])
-    if notif_items:
-        with table.batch_writer() as batch:
-            for item in notif_items:
-                batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+    for item in notif_result.get("Items", []):
+        delete_keys.append((item["PK"], item["SK"]))
 
-    # 4. Delete Cognito user — frees the email for re-invite or new registration
+    # 3. Delete atomically. transact_write_items is all-or-nothing, so a failure
+    #    leaves every record intact and the deletion is safely retryable.
+    #    Chunked at 100 (the transaction item limit).
+    client = dynamodb.meta.client
+    for i in range(0, len(delete_keys), 100):
+        chunk = delete_keys[i:i + 100]
+        client.transact_write_items(
+            TransactItems=[
+                {"Delete": {"TableName": TABLE_NAME, "Key": {"PK": {"S": pk}, "SK": {"S": sk}}}}
+                for pk, sk in chunk
+            ]
+        )
+
+    # 4. Delete Cognito user LAST — irreversible, so it only runs once all
+    #    DynamoDB cleanup has succeeded. Frees the email for re-invite/registration.
     if tester_email and USER_POOL_ID:
         try:
             cognito.admin_delete_user(UserPoolId=USER_POOL_ID, Username=tester_email)
