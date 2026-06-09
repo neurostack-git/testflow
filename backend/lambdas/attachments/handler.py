@@ -55,11 +55,12 @@ def generate_presigned_url(event: dict) -> dict:
     if not folder:
         return response(400, {"error": f"File type {content_type} not allowed"})
 
+    safe_filename = os.path.basename(filename).replace("..", "").strip("/\\")
     if upload_type == "report":
-        s3_key = f"{project_id}/reports/{uuid.uuid4()}_{filename}"
+        s3_key = f"{project_id}/reports/{uuid.uuid4()}_{safe_filename}"
     else:
         bug_id = body.get("bugId", body.get("tempBugId", str(uuid.uuid4()))).strip()
-        s3_key = f"{project_id}/{bug_id}/{folder}/{uuid.uuid4()}_{filename}"
+        s3_key = f"{project_id}/{bug_id}/{folder}/{uuid.uuid4()}_{safe_filename}"
 
     presigned_url = s3.generate_presigned_url(
         "put_object",
@@ -111,7 +112,7 @@ def get_view_url(event: dict) -> dict:
     presigned_url = s3.generate_presigned_url(
         "get_object",
         Params=presign_params,
-        ExpiresIn=3600,
+        ExpiresIn=86400,
     )
 
     return response(200, {"url": presigned_url, "filename": filename})

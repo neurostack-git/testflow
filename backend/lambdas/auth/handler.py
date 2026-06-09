@@ -141,5 +141,5 @@ def invite_tester(event: dict, admin_sub: str, admin_role: str) -> dict:
             except Exception:
                 pass
 
-        return response(400, {"error": "Can't send invite. This user is already a TestFlow user."})
+        return response(200, {"message": "Tester added. They already have a TestFlow account so no invite email was sent.", "testerId": tester_sub})
 

@@ -41,7 +41,7 @@ def handle_bug_fixed(event: dict) -> dict:
         </div>
         <p style="color: #555; margin-bottom: 24px;">
           Please log in to TestFlow, retest the bug, and update the status to
-          <strong>Verified</strong> if fixed or <strong>Reopen</strong> if the issue persists.
+          <strong>Closed</strong> if fixed or <strong>Open</strong> if the issue persists.
         </p>
         <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
           This is an automated notification from TestFlow.
@@ -54,7 +54,7 @@ def handle_bug_fixed(event: dict) -> dict:
         f"Bug fixed — please retest\n\n"
         f"Project: {project_title}\n"
         f"Bug: {bug_title}\n\n"
-        f"Log in to TestFlow and update the status to Verified or Reopen."
+        f"Log in to TestFlow and update the status to Closed or Open."
     )
 
     # Send email via SES

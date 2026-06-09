@@ -1,6 +1,7 @@
 import json
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -76,18 +77,27 @@ def list_projects(user_sub: str, user_role: str) -> dict:
         )
         project_ids = [item["GSI1SK"].replace("PROJECT#", "") for item in result.get("Items", [])]
         projects = []
-        for pid in project_ids:
-            item = table.get_item(Key={"PK": f"PROJECT#{pid}", "SK": "METADATA"}).get("Item")
-            if item and not item.get("deletedAt"):
-                projects.append(item)
+        if project_ids:
+            for i in range(0, len(project_ids), 100):
+                chunk = project_ids[i:i + 100]
+                batch_resp = dynamodb.batch_get_item(RequestItems={TABLE_NAME: {"Keys": [
+                    {"PK": f"PROJECT#{pid}", "SK": "METADATA"} for pid in chunk
+                ]}})
+                for item in batch_resp.get("Responses", {}).get(TABLE_NAME, []):
+                    if not item.get("deletedAt"):
+                        projects.append(item)
 
-    for proj in projects:
+    def _fetch_count(proj):
         pid = proj.get("projectId", "")
         count_result = table.query(
             KeyConditionExpression=Key("PK").eq(f"PROJECT#{pid}") & Key("SK").begins_with("MEMBER#"),
             Select="COUNT",
         )
         proj["testerCount"] = count_result.get("Count", 0)
+
+    if projects:
+        with ThreadPoolExecutor(max_workers=min(len(projects), 10)) as executor:
+            list(executor.map(_fetch_count, projects))
 
     return response(200, {"projects": projects})
 
@@ -239,42 +249,42 @@ def permanent_delete_project(project_id: str, user_sub: str, user_role: str) -> 
     if proj.get("GSI1PK") != f"ADMIN#{user_sub}":
         return response(403, {"error": "Forbidden"})
 
-    # Collect all items for this project
-    all_items = []
+    # Process one DynamoDB page at a time to avoid loading all items into memory
     last_key = None
     while True:
         kwargs = {"KeyConditionExpression": Key("PK").eq(f"PROJECT#{project_id}")}
         if last_key:
             kwargs["ExclusiveStartKey"] = last_key
         result = table.query(**kwargs)
-        all_items.extend(result.get("Items", []))
+        page_items = result.get("Items", [])
+
+        # Delete S3 objects for this page
+        if BUCKET_NAME:
+            for item in page_items:
+                sk = item.get("SK", "")
+                if sk.startswith("BUG#"):
+                    for key in item.get("screenshots", []) + item.get("documents", []):
+                        if key:
+                            try:
+                                s3.delete_object(Bucket=BUCKET_NAME, Key=key)
+                            except Exception:
+                                pass
+                elif sk.startswith("REPORT#"):
+                    s3_key = item.get("s3Key")
+                    if s3_key:
+                        try:
+                            s3.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+                        except Exception:
+                            pass
+
+        # Batch delete DynamoDB items for this page
+        with table.batch_writer() as batch:
+            for item in page_items:
+                batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+
         last_key = result.get("LastEvaluatedKey")
         if not last_key:
             break
-
-    # Delete S3 objects for bugs and reports
-    if BUCKET_NAME:
-        for item in all_items:
-            sk = item.get("SK", "")
-            if sk.startswith("BUG#"):
-                for key in item.get("screenshots", []) + item.get("documents", []):
-                    if key:
-                        try:
-                            s3.delete_object(Bucket=BUCKET_NAME, Key=key)
-                        except Exception:
-                            pass
-            elif sk.startswith("REPORT#"):
-                s3_key = item.get("s3Key")
-                if s3_key:
-                    try:
-                        s3.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
-                    except Exception:
-                        pass
-
-    # Batch delete all DynamoDB items
-    with table.batch_writer() as batch:
-        for item in all_items:
-            batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
 
     return response(200, {"message": "Project permanently deleted"})
 

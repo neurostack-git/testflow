@@ -84,16 +84,31 @@ def list_bugs(project_id: str, user_sub: str, user_role: str) -> dict:
     if not _check_project_access(project_id, user_sub, user_role):
         return response(403, {"error": "Forbidden"})
 
-    result = table.query(
-        KeyConditionExpression=Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("BUG#"),
-    )
-    bugs = result.get("Items", [])
+    bugs = []
+    last_key = None
+    while True:
+        kwargs = {
+            "KeyConditionExpression": Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("BUG#"),
+        }
+        if last_key:
+            kwargs["ExclusiveStartKey"] = last_key
+        result = table.query(**kwargs)
+        bugs.extend(result.get("Items", []))
+        last_key = result.get("LastEvaluatedKey")
+        if not last_key:
+            break
 
-    reporter_subs = {b.get("reportedBy") for b in bugs if b.get("reportedBy")}
+    reporter_subs = list({b.get("reportedBy") for b in bugs if b.get("reportedBy")})
     name_map = {}
-    for sub in reporter_subs:
-        profile = table.get_item(Key={"PK": f"USER#{sub}", "SK": "PROFILE"}).get("Item", {})
-        name_map[sub] = profile.get("name") or profile.get("email", "").split("@")[0] or sub[:8]
+    if reporter_subs:
+        for i in range(0, len(reporter_subs), 100):
+            chunk = reporter_subs[i:i + 100]
+            batch_resp = dynamodb.batch_get_item(RequestItems={TABLE_NAME: {"Keys": [
+                {"PK": f"USER#{sub}", "SK": "PROFILE"} for sub in chunk
+            ]}})
+            for profile in batch_resp.get("Responses", {}).get(TABLE_NAME, []):
+                sub = profile["PK"].replace("USER#", "")
+                name_map[sub] = profile.get("name") or profile.get("email", "").split("@")[0] or sub[:8]
     for bug in bugs:
         bug["reporterName"] = name_map.get(bug.get("reportedBy", ""), "Unknown")
 
