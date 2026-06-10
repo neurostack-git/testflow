@@ -322,5 +322,13 @@ def delete_bug(project_id: str, bug_id: str, user_sub: str, user_role: str) -> d
     if not bug:
         return response(404, {"error": "Bug not found"})
 
+    if BUCKET_NAME:
+        for key in bug.get("screenshots", []) + bug.get("documents", []) + bug.get("videos", []):
+            if key:
+                try:
+                    s3.delete_object(Bucket=BUCKET_NAME, Key=key)
+                except Exception:
+                    pass
+
     table.delete_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"BUG#{bug_id}"})
     return response(200, {"message": "Bug deleted"})
