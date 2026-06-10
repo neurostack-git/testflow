@@ -155,11 +155,12 @@ def _handle_send(project_id, connection_id, sender_sub, sender_name, sender_role
     online_subs = {item.get("userSub") for item in online_result.get("Items", [])}
 
     if mentions:
-        # Only notify users who are explicitly @mentioned
+        # Only notify users who are explicitly @mentioned AND currently offline
         for mentioned_sub in mentions:
             if mentioned_sub == sender_sub:
                 continue
-            _create_notif(mentioned_sub, "mention", project_id, project_title, sender_name, content, now)
+            if mentioned_sub not in online_subs:
+                _create_notif(mentioned_sub, "mention", project_id, project_title, sender_name, content, now)
 
     return {"statusCode": 200}
 
