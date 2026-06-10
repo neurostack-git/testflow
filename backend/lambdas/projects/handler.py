@@ -263,7 +263,7 @@ def permanent_delete_project(project_id: str, user_sub: str, user_role: str) -> 
             for item in page_items:
                 sk = item.get("SK", "")
                 if sk.startswith("BUG#"):
-                    for key in item.get("screenshots", []) + item.get("documents", []):
+                    for key in item.get("screenshots", []) + item.get("documents", []) + item.get("videos", []):
                         if key:
                             try:
                                 s3.delete_object(Bucket=BUCKET_NAME, Key=key)
