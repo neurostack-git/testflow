@@ -113,16 +113,9 @@ def invite_tester(event: dict, admin_sub: str, admin_role: str) -> dict:
         if user_status == "FORCE_CHANGE_PASSWORD":
             return response(400, {"error": "Can't send invite. An invite has already been sent to this email and is pending acceptance."})
 
-        # CONFIRMED tester — check if already a member
-        already_member = any(
-            table.get_item(Key={"PK": f"PROJECT#{pid}", "SK": f"MEMBER#{tester_sub}"}).get("Item")
-            for pid in admin_project_ids
-        )
-        if already_member:
-            return response(400, {"error": "This tester is already a member of your organisation."})
-
-        # CONFIRMED tester not yet in any admin project — add them directly
-        # (they're already confirmed so no pending flow needed)
+        # CONFIRMED tester — add to any admin projects they are not yet in.
+        # attribute_not_exists condition silently skips existing memberships, so this
+        # is safe whether the tester is in all, some, or none of the admin's projects.
         now = datetime.now(timezone.utc).isoformat()
         for pid in admin_project_ids:
             try:
@@ -139,7 +132,7 @@ def invite_tester(event: dict, admin_sub: str, admin_role: str) -> dict:
                     ConditionExpression="attribute_not_exists(SK)",
                 )
             except Exception:
-                pass
+                pass  # Already a member of this project — fine
 
         return response(200, {"message": "Tester added. They already have a TestFlow account so no invite email was sent.", "testerId": tester_sub})
 

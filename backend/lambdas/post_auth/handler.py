@@ -48,10 +48,23 @@ def lambda_handler(event: dict, context) -> dict:
     ).get("Items", [])
 
     if pending:
+        # Use invitedBy from the PENDING record to find ALL of the admin's current
+        # projects — this covers projects created after the invite was sent but
+        # before the tester accepted, which would have no PENDING# record.
+        admin_sub = pending[0].get("invitedBy", "")
+        project_ids_to_join = {item["SK"].replace("PENDING#", "") for item in pending}
+
+        if admin_sub:
+            admin_projects = table.query(
+                IndexName="GSI1",
+                KeyConditionExpression=Key("GSI1PK").eq(f"ADMIN#{admin_sub}"),
+            ).get("Items", [])
+            for proj in admin_projects:
+                if proj.get("SK") == "METADATA" and proj.get("projectId") and not proj.get("deletedAt"):
+                    project_ids_to_join.add(proj["projectId"])
+
         now = datetime.now(timezone.utc).isoformat()
-        for item in pending:
-            project_id = item["SK"].replace("PENDING#", "")
-            # Add as project member
+        for project_id in project_ids_to_join:
             try:
                 table.put_item(
                     Item={
@@ -67,7 +80,9 @@ def lambda_handler(event: dict, context) -> dict:
                 )
             except Exception:
                 pass  # Already a member — fine
-            # Delete the pending invite record
+
+        # Delete all PENDING records
+        for item in pending:
             table.delete_item(Key={"PK": f"USER#{sub}", "SK": item["SK"]})
 
     return event  # Cognito triggers must return the event unchanged
