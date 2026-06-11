@@ -112,22 +112,20 @@ def update_profile(event: dict, user_sub: str, user_email: str) -> dict:
 
 
 def normalise_phone(phone: str) -> str:
-    """Ensure E.164 format. Prepends +91 for 10-digit Indian numbers."""
-    phone = phone.strip().replace(" ", "").replace("-", "")
-    if not phone.startswith("+"):
-        if len(phone) == 10:
-            phone = "+91" + phone
-        else:
-            phone = "+" + phone
-    return phone
+    """Strip whitespace and common formatting characters only."""
+    return phone.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
 
 
 def send_phone_otp(event: dict, user_sub: str) -> dict:
     body = json.loads(event.get("body") or "{}")
-    phone = normalise_phone(body.get("phone", ""))
+    raw = body.get("phone", "").strip()
 
-    if not phone:
+    if not raw:
         return response(400, {"error": "phone is required"})
+
+    phone = normalise_phone(raw)
+    if not phone.startswith("+"):
+        return response(400, {"error": "Include your country code (e.g. +1 for US, +91 for India, +44 for UK)"})
 
     otp = str(secrets.randbelow(1000000)).zfill(6)
     # DynamoDB TTL attribute (epoch seconds) — auto-purges expired OTP rows.

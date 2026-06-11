@@ -128,6 +128,10 @@ def create_bug(event: dict, project_id: str, user_sub: str, user_role: str) -> d
 
     if not title:
         return response(400, {"error": "title is required"})
+    if len(title) > 500:
+        return response(400, {"error": "Title must be 500 characters or fewer"})
+    if len(description) > 10000:
+        return response(400, {"error": "Description must be 10,000 characters or fewer"})
 
     bug_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -181,6 +185,10 @@ def update_bug(event: dict, project_id: str, bug_id: str, user_sub: str, user_ro
 
     if not title:
         return response(400, {"error": "title is required"})
+    if len(title) > 500:
+        return response(400, {"error": "Title must be 500 characters or fewer"})
+    if len(description) > 10000:
+        return response(400, {"error": "Description must be 10,000 characters or fewer"})
 
     if new_status and new_status != bug.get("status"):
         if user_role == "admin":

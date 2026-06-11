@@ -112,6 +112,8 @@ def _message(event: dict, connection_id: str) -> dict:
         mentions = body.get("mentions", [])
         if not content:
             return {"statusCode": 400}
+        if len(content) > 4000:
+            return {"statusCode": 400}
         return _handle_send(project_id, connection_id, sender_sub, sender_name, sender_role, content, mentions)
 
     if action == "typing":
