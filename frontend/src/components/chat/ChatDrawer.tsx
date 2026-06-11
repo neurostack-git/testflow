@@ -79,6 +79,7 @@ export function ChatDrawer({
   const [clearConfirm, setClearConfirm] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [clearError, setClearError] = useState(false);
+  const [sendError, setSendError] = useState(false);
   // Map of member sub → resolved avatar URL (presigned)
   const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
 
@@ -196,7 +197,12 @@ export function ChatDrawer({
 
   const handleSend = useCallback(() => {
     const content = input.trim();
-    if (!content || !connected) return;
+    if (!content) return;
+    if (!connected) {
+      setSendError(true);
+      setTimeout(() => setSendError(false), 3000);
+      return;
+    }
     sendMessage(content, mentions.map((m) => m.sub));
     setInput("");
     setMentions([]);
@@ -454,9 +460,15 @@ export function ChatDrawer({
               <Send className="w-4 h-4" />
             </button>
           </div>
-          <p className="text-[10px] text-muted-foreground/50 mt-1.5 px-1">
-            Enter to send · Shift+Enter for new line
-          </p>
+          {sendError ? (
+            <p className="text-[10px] text-destructive mt-1.5 px-1">
+              Not connected — please wait or click Reconnect
+            </p>
+          ) : (
+            <p className="text-[10px] text-muted-foreground/50 mt-1.5 px-1">
+              Enter to send · Shift+Enter for new line
+            </p>
+          )}
         </div>
       </div>
     </>
