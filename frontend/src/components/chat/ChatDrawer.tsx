@@ -449,10 +449,10 @@ export function ChatDrawer({
             />
             <button
               onClick={handleSend}
-              disabled={!input.trim() || !connected}
+              disabled={!input.trim() || !connected || input.length > 4000}
               className={cn(
                 "p-2 rounded-xl transition-colors shrink-0",
-                input.trim() && connected
+                input.trim() && connected && input.length <= 4000
                   ? "bg-primary text-primary-foreground hover:bg-primary/90"
                   : "bg-muted text-muted-foreground cursor-not-allowed"
               )}
@@ -460,15 +460,22 @@ export function ChatDrawer({
               <Send className="w-4 h-4" />
             </button>
           </div>
-          {sendError ? (
-            <p className="text-[10px] text-destructive mt-1.5 px-1">
-              Not connected — please wait or click Reconnect
-            </p>
-          ) : (
-            <p className="text-[10px] text-muted-foreground/50 mt-1.5 px-1">
-              Enter to send · Shift+Enter for new line
-            </p>
-          )}
+          <div className="flex items-center justify-between mt-1.5 px-1">
+            {sendError ? (
+              <p className="text-[10px] text-destructive">
+                Not connected — please wait or click Reconnect
+              </p>
+            ) : (
+              <p className="text-[10px] text-muted-foreground/50">
+                Enter to send · Shift+Enter for new line
+              </p>
+            )}
+            {input.length > 3500 && (
+              <span className={cn("text-[10px] shrink-0", input.length > 4000 ? "text-destructive font-medium" : "text-muted-foreground/60")}>
+                {input.length}/4,000
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </>

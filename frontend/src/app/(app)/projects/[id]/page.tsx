@@ -713,16 +713,26 @@ export default function ProjectDetailPage() {
           {isCreating ? (
             <form onSubmit={handleSubmitBug} className="space-y-4 mt-2">
               <div className="space-y-2">
-                <Label htmlFor="bug-title">Bug Title</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="bug-title">Bug Title</Label>
+                  <span className={cn("text-[11px]", newBugTitle.length > 450 ? "text-destructive" : "text-muted-foreground/60")}>
+                    {newBugTitle.length}/500
+                  </span>
+                </div>
                 <Input id="bug-title" placeholder="Short description of the issue"
-                  value={newBugTitle} onChange={(e) => setNewBugTitle(e.target.value)} autoFocus required />
+                  value={newBugTitle} onChange={(e) => setNewBugTitle(e.target.value)} autoFocus required maxLength={500} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="bug-desc">Description</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="bug-desc">Description</Label>
+                  <span className={cn("text-[11px]", newBugDesc.length > 9000 ? "text-destructive" : "text-muted-foreground/60")}>
+                    {newBugDesc.length}/10,000
+                  </span>
+                </div>
                 <textarea id="bug-desc"
                   className="w-full min-h-24 rounded-lg border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
                   placeholder="Steps to reproduce, expected vs actual behaviour..."
-                  value={newBugDesc} onChange={(e) => setNewBugDesc(e.target.value)} />
+                  value={newBugDesc} onChange={(e) => setNewBugDesc(e.target.value)} maxLength={10000} />
               </div>
               <div className="space-y-2">
                 <Label>Screenshots <span className="text-muted-foreground font-normal">(max 10, images only)</span></Label>
@@ -949,22 +959,34 @@ export default function ProjectDetailPage() {
           {editBug && (
             <form onSubmit={handleSaveEdit} className="space-y-4 mt-2">
               <div className="space-y-2">
-                <Label htmlFor="edit-title">Title</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="edit-title">Title</Label>
+                  <span className={cn("text-[11px]", editTitle.length > 450 ? "text-destructive" : "text-muted-foreground/60")}>
+                    {editTitle.length}/500
+                  </span>
+                </div>
                 <Input
                   id="edit-title"
                   value={editTitle}
                   onChange={(e) => setEditTitle(e.target.value)}
                   autoFocus
                   required
+                  maxLength={500}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-desc">Description</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="edit-desc">Description</Label>
+                  <span className={cn("text-[11px]", editDesc.length > 9000 ? "text-destructive" : "text-muted-foreground/60")}>
+                    {editDesc.length}/10,000
+                  </span>
+                </div>
                 <textarea
                   id="edit-desc"
                   className="w-full min-h-24 rounded-lg border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
                   value={editDesc}
                   onChange={(e) => setEditDesc(e.target.value)}
+                  maxLength={10000}
                 />
               </div>
               <div className="space-y-2">
