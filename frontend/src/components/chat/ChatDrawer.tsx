@@ -66,7 +66,7 @@ export function ChatDrawer({
   currentUserName,
   currentUserRole,
 }: ChatDrawerProps) {
-  const { messages, typingNames, connected, historyLoading, hasMore, members, sendMessage, sendTyping, loadMore, clearMessages } =
+  const { messages, typingNames, connected, reconnectFailed, historyLoading, hasMore, members, sendMessage, sendTyping, loadMore, clearMessages, reconnect } =
     useProjectChat(projectId, open, currentUserSub);
 
   const [input, setInput] = useState("");
@@ -243,6 +243,8 @@ export function ChatDrawer({
           <div className="flex items-center gap-1.5 shrink-0">
             {connected ? (
               <span title="Connected"><Wifi className="w-3.5 h-3.5 text-green-500" /></span>
+            ) : reconnectFailed ? (
+              <span title="Connection lost"><WifiOff className="w-3.5 h-3.5 text-destructive" /></span>
             ) : (
               <span title="Connecting…"><WifiOff className="w-3.5 h-3.5 text-muted-foreground" /></span>
             )}
@@ -287,6 +289,19 @@ export function ChatDrawer({
             </button>
           </div>
         </div>
+
+        {/* Reconnect banner */}
+        {reconnectFailed && (
+          <div className="flex items-center justify-between px-3 py-2 bg-destructive/10 border-b border-destructive/20 shrink-0">
+            <span className="text-xs text-destructive font-medium">Connection lost</span>
+            <button
+              onClick={reconnect}
+              className="text-xs font-semibold text-primary hover:underline"
+            >
+              Reconnect
+            </button>
+          </div>
+        )}
 
         {/* Message list */}
         <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-0">
@@ -408,7 +423,7 @@ export function ChatDrawer({
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder={connected ? "Message… (@ to mention)" : "Connecting…"}
+              placeholder={connected ? "Message… (@ to mention)" : reconnectFailed ? "Connection lost" : "Connecting…"}
               disabled={!connected}
               rows={1}
               className={cn(

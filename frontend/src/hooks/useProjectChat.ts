@@ -15,6 +15,7 @@ interface UseProjectChatReturn {
   messages: ChatMessage[];
   typingNames: string[];
   connected: boolean;
+  reconnectFailed: boolean;
   historyLoading: boolean;
   hasMore: boolean;
   members: ChatMember[];
@@ -22,6 +23,7 @@ interface UseProjectChatReturn {
   sendTyping: () => void;
   loadMore: () => Promise<void>;
   clearMessages: () => void;
+  reconnect: () => void;
 }
 
 export function useProjectChat(
@@ -31,6 +33,7 @@ export function useProjectChat(
 ): UseProjectChatReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connected, setConnected] = useState(false);
+  const [reconnectFailed, setReconnectFailed] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [members, setMembers] = useState<ChatMember[]>([]);
@@ -40,6 +43,7 @@ export function useProjectChat(
   const cursorRef = useRef<string | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const wasDisconnectedRef = useRef(false);
   const enabledRef = useRef(enabled);
   const typingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -80,6 +84,23 @@ export function useProjectChat(
     }
   }, [projectId]);
 
+  // Fetch latest messages and merge — used after a reconnect to fill the gap
+  const refreshAfterReconnect = useCallback(async () => {
+    try {
+      const histRes = await chatApi.history(projectId);
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.messageId));
+        const newMsgs = histRes.messages.filter((m) => !existingIds.has(m.messageId));
+        if (newMsgs.length === 0) return prev;
+        return [...prev, ...newMsgs].sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+      });
+    } catch {
+      // best-effort — existing messages still visible
+    }
+  }, [projectId]);
+
   // ── WebSocket lifecycle ────────────────────────────────────────────────────
 
   const connect = useCallback(async () => {
@@ -98,12 +119,18 @@ export function useProjectChat(
 
     ws.onopen = () => {
       setConnected(true);
+      setReconnectFailed(false);
       reconnectAttemptsRef.current = 0;
+      if (wasDisconnectedRef.current) {
+        wasDisconnectedRef.current = false;
+        refreshAfterReconnect();
+      }
     };
 
     ws.onclose = () => {
       setConnected(false);
       wsRef.current = null;
+      wasDisconnectedRef.current = true;
       // Auto-reconnect if drawer is still open (max 4 attempts, exponential backoff)
       if (enabledRef.current && reconnectAttemptsRef.current < 4) {
         const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 15000);
@@ -111,6 +138,8 @@ export function useProjectChat(
         reconnectTimerRef.current = setTimeout(() => {
           if (enabledRef.current) connect();
         }, delay);
+      } else if (enabledRef.current) {
+        setReconnectFailed(true);
       }
     };
 
@@ -179,9 +208,17 @@ export function useProjectChat(
     setConnected(false);
   }, []);
 
+  const reconnect = useCallback(() => {
+    setReconnectFailed(false);
+    reconnectAttemptsRef.current = 0;
+    connect();
+  }, [connect]);
+
   useEffect(() => {
     if (enabled) {
       reconnectAttemptsRef.current = 0;
+      wasDisconnectedRef.current = false;
+      setReconnectFailed(false);
       fetchHistory();
       connect();
     } else {
@@ -214,5 +251,5 @@ export function useProjectChat(
 
   const clearMessages = useCallback(() => setMessages([]), []);
 
-  return { messages, typingNames, connected, historyLoading, hasMore, members, sendMessage, sendTyping, loadMore, clearMessages };
+  return { messages, typingNames, connected, reconnectFailed, historyLoading, hasMore, members, sendMessage, sendTyping, loadMore, clearMessages, reconnect };
 }
