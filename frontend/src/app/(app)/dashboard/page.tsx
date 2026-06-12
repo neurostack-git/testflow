@@ -11,6 +11,9 @@ import Link from "next/link";
 import { projectsApi, type Project } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { Spinner } from "@/components/ui/spinner";
+import { ErrorAlert } from "@/components/ui/error-alert";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -67,7 +70,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center min-h-64">
-        <div className="w-7 h-7 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -96,9 +99,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {error && (
-        <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg mb-6">{error}</p>
-      )}
+      <ErrorAlert message={error} className="mb-6" />
 
       {projects.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -185,40 +186,19 @@ export default function DashboardPage() {
       </Dialog>
 
       {/* Move to Bin Confirmation Dialog */}
-      <Dialog open={binConfirm.open} onOpenChange={(o) => !binning && setBinConfirm({ open: o, projectId: "", title: "" })}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Move to Bin?</DialogTitle>
-          </DialogHeader>
-          <div className="mt-1 space-y-5">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-muted rounded-xl flex items-center justify-center shrink-0">
-                <Trash2 className="w-5 h-5 text-muted-foreground" />
-              </div>
-              <div>
-                <p className="font-semibold text-foreground text-sm">{binConfirm.title}</p>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  This project will be moved to the Bin. You can restore it anytime.
-                </p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setBinConfirm({ open: false, projectId: "", title: "" })} disabled={binning}>
-                Cancel
-              </Button>
-              <Button
-                variant="outline"
-                className="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
-                onClick={confirmSoftDelete}
-                disabled={binning}
-              >
-                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                {binning ? "Moving…" : "Move to Bin"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={binConfirm.open}
+        onOpenChange={(o) => !binning && setBinConfirm({ open: o, projectId: "", title: "" })}
+        onConfirm={confirmSoftDelete}
+        title="Move to Bin?"
+        icon={Trash2}
+        iconVariant="muted"
+        itemName={binConfirm.title}
+        description="This project will be moved to the Bin. You can restore it anytime."
+        confirmLabel="Move to Bin"
+        confirmingLabel="Moving…"
+        confirming={binning}
+      />
     </div>
   );
 }

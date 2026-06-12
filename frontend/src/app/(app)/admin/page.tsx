@@ -2,12 +2,13 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { UserPlus, Trash2, Users, ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
-import { projectsApi, authApi, type Project, type Member } from "@/lib/api";
+import { projectsApi, type Project, type Member } from "@/lib/api";
+import { Spinner } from "@/components/ui/spinner";
+import { ErrorAlert } from "@/components/ui/error-alert";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { InviteTesterDialog } from "@/components/projects/InviteTesterDialog";
 
 export default function AdminPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -15,10 +16,7 @@ export default function AdminPage() {
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [loadingMembers, setLoadingMembers] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [inviteDialog, setInviteDialog] = useState<{ open: boolean; projectId: string | null }>({ open: false, projectId: null });
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviting, setInviting] = useState(false);
-  const [inviteSent, setInviteSent] = useState(false);
+  const [inviteDialog, setInviteDialog] = useState<{ open: boolean; projectId: string }>({ open: false, projectId: "" });
   const [error, setError] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; projectId: string; member: Member | null }>({ open: false, projectId: "", member: null });
   const [deleting, setDeleting] = useState(false);
@@ -54,28 +52,6 @@ export default function AdminPage() {
     }
   }
 
-  async function handleInvite(e: React.FormEvent) {
-    e.preventDefault();
-    if (!inviteEmail.trim() || !inviteDialog.projectId) return;
-    setInviting(true);
-    setError("");
-    try {
-      await authApi.inviteTester(inviteEmail.trim(), inviteDialog.projectId);
-      setInviteSent(true);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to invite tester");
-    } finally {
-      setInviting(false);
-    }
-  }
-
-  function closeInviteDialog() {
-    setInviteDialog({ open: false, projectId: null });
-    setInviteEmail("");
-    setInviteSent(false);
-    setError("");
-  }
-
   async function confirmDelete() {
     if (!deleteConfirm.member) return;
     setDeleting(true);
@@ -83,7 +59,6 @@ export default function AdminPage() {
     try {
       await projectsApi.removeMember(deleteConfirm.projectId, deleteConfirm.member.memberId);
       const deletedId = deleteConfirm.member.memberId;
-      // Remove from ALL projects in local state (account is fully deleted)
       setMembers((prev) => {
         const updated: Record<string, Member[]> = {};
         for (const [pid, list] of Object.entries(prev)) {
@@ -105,7 +80,7 @@ export default function AdminPage() {
   if (loadingProjects) {
     return (
       <div className="p-8 flex items-center justify-center min-h-64">
-        <div className="w-7 h-7 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -117,9 +92,7 @@ export default function AdminPage() {
         <p className="text-muted-foreground mt-0.5">Manage projects and testers</p>
       </div>
 
-      {error && (
-        <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg mb-4">{error}</p>
-      )}
+      <ErrorAlert message={error} className="mb-4" />
 
       <div className="space-y-3">
         {projects.map((project) => (
@@ -160,7 +133,7 @@ export default function AdminPage() {
               <div className="border-t border-border">
                 {loadingMembers[project.projectId] ? (
                   <div className="flex justify-center py-6">
-                    <div className="w-5 h-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                    <Spinner size="md" />
                   </div>
                 ) : (members[project.projectId] ?? []).length === 0 ? (
                   <div className="px-5 py-6 text-center text-sm text-muted-foreground">
@@ -209,116 +182,28 @@ export default function AdminPage() {
         )}
       </div>
 
-      <Dialog open={inviteDialog.open} onOpenChange={(o) => { if (!o) closeInviteDialog(); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Invite Tester</DialogTitle>
-          </DialogHeader>
+      <InviteTesterDialog
+        open={inviteDialog.open}
+        projectId={inviteDialog.projectId}
+        onOpenChange={(o) => setInviteDialog((prev) => ({ ...prev, open: o }))}
+        successNote="They will appear in the tester list after they log in for the first time."
+      />
 
-          {inviteSent ? (
-            <div className="flex flex-col items-center text-center gap-4 py-4">
-              <div className="w-12 h-12 bg-green-100 rounded-2xl flex items-center justify-center">
-                <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <div>
-                <p className="font-semibold text-foreground">Invitation sent successfully!</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  An email with login credentials has been sent to<br />
-                  <span className="font-medium text-foreground">{inviteEmail}</span>
-                </p>
-                <p className="text-xs text-muted-foreground mt-2">
-                  They will appear in the tester list after they log in for the first time.
-                </p>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <Button variant="outline" onClick={() => { setInviteSent(false); setInviteEmail(""); setError(""); }}>
-                  Invite another
-                </Button>
-                <Button className="bg-primary hover:bg-primary/90" onClick={closeInviteDialog}>
-                  Done
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <form onSubmit={handleInvite} className="space-y-4 mt-2">
-              <div className="space-y-2">
-                <Label htmlFor="invite-email">Tester&apos;s email</Label>
-                <Input
-                  id="invite-email"
-                  type="email"
-                  placeholder="tester@example.com"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  autoFocus
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  An invite email with login credentials will be sent. They will be added to your projects after their first login.
-                </p>
-              </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              <div className="flex justify-end gap-3 pt-2">
-                <Button type="button" variant="outline" onClick={closeInviteDialog}>Cancel</Button>
-                <Button type="submit" className="bg-primary hover:bg-primary/90" disabled={inviting}>
-                  {inviting ? "Sending…" : "Send Invite"}
-                </Button>
-              </div>
-            </form>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Tester Confirmation Dialog */}
-      <Dialog
+      <ConfirmDialog
         open={deleteConfirm.open}
         onOpenChange={(o) => !deleting && setDeleteConfirm({ open: o, projectId: "", member: null })}
-      >
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete tester account?</DialogTitle>
-          </DialogHeader>
-          <div className="mt-1 space-y-5">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-destructive/10 rounded-xl flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5 text-destructive" />
-              </div>
-              <div>
-                <p className="font-semibold text-foreground text-sm">
-                  {deleteConfirm.member?.name}{" "}
-                  <span className="font-normal text-muted-foreground">({deleteConfirm.member?.email})</span>
-                </p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  This will permanently delete their account, remove them from all projects, and cancel any pending invites. Their email will be freed for re-invite or new registration.
-                </p>
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  Bugs they reported will be kept.
-                </p>
-              </div>
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <div className="flex justify-end gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setDeleteConfirm({ open: false, projectId: "", member: null })}
-                disabled={deleting}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="outline"
-                className="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
-                onClick={confirmDelete}
-                disabled={deleting}
-              >
-                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                {deleting ? "Deleting…" : "Delete Account"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+        onConfirm={confirmDelete}
+        title="Delete tester account?"
+        icon={AlertTriangle}
+        iconVariant="destructive"
+        itemName={deleteConfirm.member ? `${deleteConfirm.member.name} (${deleteConfirm.member.email})` : undefined}
+        description="This will permanently delete their account, remove them from all projects, and cancel any pending invites. Their email will be freed for re-invite or new registration."
+        extra={<p className="text-xs text-muted-foreground mt-1.5">Bugs they reported will be kept.</p>}
+        confirmLabel="Delete Account"
+        confirmingLabel="Deleting…"
+        confirming={deleting}
+        error={error}
+      />
     </div>
   );
 }

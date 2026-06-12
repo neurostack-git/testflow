@@ -3,13 +3,11 @@
 import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Plus, Search, X, Image, ChevronDown, Check, Eye, Pencil, Trash2 } from "lucide-react";
+import { Plus, Search, X, Image, Eye, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type Bug, type BugStatus } from "@/lib/api";
-import { ALL_STATUSES, STATUS_STYLES, STATUS_ICONS, STATUS_ICON_COLORS } from "@/lib/bug-status";
+import { ALL_STATUSES } from "@/lib/bug-status";
+import { StatusBadge } from "@/components/projects/StatusBadge";
 
 type SummaryFilter = "unsolved" | "today" | null;
 
@@ -169,7 +167,6 @@ export function BugTable({
               const dropdownStatuses = ALL_STATUSES.includes(bug.status as BugStatus)
                 ? ALL_STATUSES
                 : [bug.status as BugStatus, ...ALL_STATUSES];
-              const TriggerIcon = STATUS_ICONS[bug.status];
               return (
                 <TableRow
                   key={bug.bugId}
@@ -192,38 +189,13 @@ export function BugTable({
                     )}
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        className={cn(
-                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
-                          STATUS_STYLES[bug.status]
-                        )}
-                      >
-                        <TriggerIcon className="w-3 h-3" />
-                        {bug.status}
-                        <ChevronDown className="w-3 h-3 opacity-60" />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="w-44">
-                        {dropdownStatuses.map((s) => {
-                          const Icon = STATUS_ICONS[s];
-                          const isCurrent = s === bug.status;
-                          const isAllowed = validTransitions.includes(s);
-                          const isInvalidStatus = s === "Invalid";
-                          return (
-                            <DropdownMenuItem
-                              key={s}
-                              disabled={isCurrent || !isAllowed}
-                              onClick={() => isAllowed && onStatusChange(bug.bugId, s)}
-                              className={cn("gap-2", isInvalidStatus && "text-red-500 focus:text-red-500")}
-                            >
-                              <Icon className={cn("w-3.5 h-3.5 shrink-0", isInvalidStatus ? "text-red-500" : STATUS_ICON_COLORS[s])} />
-                              <span className={isCurrent ? "font-semibold" : ""}>{s}</span>
-                              {isCurrent && <Check className="w-3 h-3 ml-auto opacity-70" />}
-                            </DropdownMenuItem>
-                          );
-                        })}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <StatusBadge
+                      status={bug.status}
+                      allStatuses={dropdownStatuses}
+                      validTransitions={validTransitions}
+                      onStatusChange={(s) => onStatusChange(bug.bugId, s)}
+                      dropdownAlign="start"
+                    />
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center gap-0.5">

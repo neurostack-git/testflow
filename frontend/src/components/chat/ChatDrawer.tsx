@@ -5,6 +5,7 @@ import { X, Send, MessageCircle, Wifi, WifiOff, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useProjectChat } from "@/hooks/useProjectChat";
 import { chatApi, attachmentsApi, type ChatMember } from "@/lib/api";
+import { Spinner } from "@/components/ui/spinner";
 
 interface ChatDrawerProps {
   projectId: string;
@@ -325,7 +326,7 @@ export function ChatDrawer({
 
           {historyLoading && (
             <div className="flex justify-center py-6">
-              <div className="w-5 h-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              <Spinner size="md" />
             </div>
           )}
 

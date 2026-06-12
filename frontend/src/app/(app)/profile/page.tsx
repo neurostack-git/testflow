@@ -9,6 +9,7 @@ import { User, Mail, Shield, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usersApi } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
+import { ErrorAlert } from "@/components/ui/error-alert";
 import { AvatarUpload } from "@/components/profile/AvatarUpload";
 
 export default function ProfilePage() {
@@ -127,7 +128,7 @@ export default function ProfilePage() {
               />
               <p className="text-xs text-muted-foreground">Email cannot be changed.</p>
             </div>
-            {nameError && <p className="text-sm text-destructive">{nameError}</p>}
+            <ErrorAlert message={nameError} className="bg-transparent p-0" />
             <div className="flex justify-end">
               <Button
                 type="submit"

@@ -5,18 +5,19 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Bug, CheckCircle, Users, Zap, Eye, EyeOff } from "lucide-react";
+import { Bug, CheckCircle, Users, Zap } from "lucide-react";
 import Link from "next/link";
 import { loginUser, mapAuthError } from "@/lib/auth";
 import { useAuth } from "@/context/auth-context";
 import { AnimatedBugLogo } from "@/components/ui/animated-bug-logo";
+import { PasswordInput } from "@/components/ui/password-input";
+import { ErrorAlert } from "@/components/ui/error-alert";
 
 export default function LoginPage() {
   const router = useRouter();
   const { refresh } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -117,29 +118,15 @@ export default function LoginPage() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password" className="text-sm font-semibold text-foreground">Password</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="h-11 pr-10 text-sm"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(v => !v)}
-                  tabIndex={-1}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
+              <PasswordInput
+                id="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
             </div>
-            {error && (
-              <p className="text-sm text-destructive bg-destructive/8 px-3 py-2.5 rounded-lg font-medium">{error}</p>
-            )}
+            <ErrorAlert message={error} className="bg-destructive/8 py-2.5 font-medium" />
             <Button
               type="submit"
               className="w-full h-11 bg-primary hover:bg-primary/90 font-semibold text-sm tracking-wide"

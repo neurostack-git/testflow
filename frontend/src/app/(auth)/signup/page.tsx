@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Bug, CheckCircle, Users, Zap, Eye, EyeOff, Lock, Mail, User, Check, X } from "lucide-react";
+import { Bug, CheckCircle, Users, Zap, Lock, Mail, User, Check, X } from "lucide-react";
 import Link from "next/link";
 import { registerAdmin, confirmUserSignUp, mapAuthError } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { AnimatedBugLogo } from "@/components/ui/animated-bug-logo";
+import { PasswordInput } from "@/components/ui/password-input";
+import { ErrorAlert } from "@/components/ui/error-alert";
 
 type Step = "register" | "verify" | "success";
 
@@ -22,8 +24,6 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Verify form state
   const [code, setCode] = useState("");
@@ -149,32 +149,17 @@ export default function SignupPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="password" className="text-sm font-semibold text-foreground">Password</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                    <Input id="password" type={showPassword ? "text" : "password"} placeholder="Min. 8 characters"
-                      value={password} onChange={(e) => setPassword(e.target.value)}
-                      className="h-11 pl-9 pr-10 text-sm" required minLength={8} />
-                    <button type="button" onClick={() => setShowPassword(v => !v)} tabIndex={-1}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
+                  <PasswordInput id="password" placeholder="Min. 8 characters" leadingIcon={Lock}
+                    value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="confirm" className="text-sm font-semibold text-foreground">Confirm Password</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                    <Input id="confirm" type={showConfirmPassword ? "text" : "password"} placeholder="Re-enter your password"
-                      value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
-                      className={cn("h-11 pl-9 pr-10 text-sm",
-                        passwordsMatch && "border-green-400 focus-visible:ring-green-300",
-                        passwordsMismatch && "border-destructive focus-visible:ring-destructive/30"
-                      )} required />
-                    <button type="button" onClick={() => setShowConfirmPassword(v => !v)} tabIndex={-1}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
-                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
+                  <PasswordInput id="confirm" placeholder="Re-enter your password" leadingIcon={Lock}
+                    value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+                    className={cn(
+                      passwordsMatch && "border-green-400 focus-visible:ring-green-300",
+                      passwordsMismatch && "border-destructive focus-visible:ring-destructive/30"
+                    )} required />
                   {confirmPassword.length > 0 && (
                     <p className={cn("flex items-center gap-1.5 text-xs font-medium mt-1",
                       passwordsMatch ? "text-green-600" : "text-destructive")}>
@@ -184,7 +169,7 @@ export default function SignupPage() {
                     </p>
                   )}
                 </div>
-                {error && <p className="text-sm text-destructive bg-destructive/8 px-3 py-2.5 rounded-lg font-medium">{error}</p>}
+                <ErrorAlert message={error} className="bg-destructive/8 py-2.5 font-medium" />
                 <Button type="submit" className="w-full h-11 bg-primary hover:bg-primary/90 font-semibold text-sm tracking-wide"
                   disabled={loading || passwordsMismatch}>
                   {loading ? "Creating account…" : "Create account"}
@@ -228,7 +213,7 @@ export default function SignupPage() {
                     required
                   />
                 </div>
-                {error && <p className="text-sm text-destructive bg-destructive/8 px-3 py-2.5 rounded-lg font-medium">{error}</p>}
+                <ErrorAlert message={error} className="bg-destructive/8 py-2.5 font-medium" />
                 <Button type="submit" className="w-full h-11 bg-primary hover:bg-primary/90 font-semibold text-sm tracking-wide"
                   disabled={loading || code.length < 6}>
                   {loading ? "Verifying…" : "Verify email"}

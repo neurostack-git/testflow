@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Trash2, RotateCcw, FolderOpen, AlertTriangle } from "lucide-react";
 import { projectsApi, type Project } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
+import { Spinner } from "@/components/ui/spinner";
 
 export default function BinPage() {
   const { user } = useAuth();
@@ -52,7 +53,7 @@ export default function BinPage() {
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center min-h-64">
-        <div className="w-7 h-7 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
