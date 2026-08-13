@@ -42,7 +42,13 @@ BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
 
 MAX_TITLE = 120
 MAX_DESCRIPTION = 2000
-MAX_ATTACHMENTS = 3
+# Per-type caps. These MUST match the constants in the frontend dialogs
+# (BugCreateDialog / BugEditDialog) or the UI will offer uploads the API rejects.
+MAX_ATTACHMENTS = {
+    "screenshots": 10,
+    "videos": 5,
+    "documents": 10,
+}
 
 
 @api_handler
@@ -270,9 +276,10 @@ def _check_attachments(value, field: str) -> list:
         return []
     if not isinstance(value, list) or any(not isinstance(v, str) for v in value):
         raise ApiError(400, f"'{field}' must be a list of S3 keys.", "bad_attachments")
-    if len(value) > MAX_ATTACHMENTS:
+    limit = MAX_ATTACHMENTS.get(field, 10)
+    if len(value) > limit:
         raise ApiError(
-            400, f"At most {MAX_ATTACHMENTS} {field} are allowed.", "attachment_limit"
+            400, f"At most {limit} {field} are allowed.", "attachment_limit"
         )
     return value
 

@@ -10,6 +10,11 @@ import { bugsApi, attachmentsApi, uploadToS3, uploadToS3WithProgress, type Bug }
 import { cn } from "@/lib/utils";
 import { trimName } from "@/lib/filenames";
 
+// Must match MAX_SCREENSHOTS / MAX_VIDEOS in backend/lambdas/bugs/handler.py —
+// the server rejects anything above these.
+const MAX_SCREENSHOTS = 10;
+const MAX_VIDEOS = 5;
+
 interface BugCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -106,12 +111,19 @@ export function BugCreateDialog({ open, onOpenChange, projectId, reporterName, o
               value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={10000} />
           </div>
           <div className="space-y-2">
-            <Label>Screenshots <span className="text-muted-foreground font-normal">(max 10, images only)</span></Label>
+            <Label>Screenshots <span className="text-muted-foreground font-normal">(max {MAX_SCREENSHOTS}, images only)</span></Label>
             <label className="flex items-center justify-center gap-2 w-full h-20 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors text-sm text-muted-foreground">
               <Upload className="w-4 h-4" />
               Click to upload screenshots
               <input type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
-                onChange={(e) => { setFiles((prev) => [...prev, ...Array.from(e.target.files || [])].slice(0, 10)); e.target.value = ""; }} />
+                onChange={(e) => {
+                  // Read the FileList BEFORE clearing the input. React runs the
+                  // functional updater during render, by which point resetting
+                  // `value` has already emptied `e.target.files`.
+                  const picked = Array.from(e.target.files ?? []);
+                  e.target.value = "";
+                  setFiles((prev) => [...prev, ...picked].slice(0, MAX_SCREENSHOTS));
+                }} />
             </label>
             {files.length > 0 && (
               <div className="space-y-1.5 mt-2">
@@ -131,12 +143,16 @@ export function BugCreateDialog({ open, onOpenChange, projectId, reporterName, o
             )}
           </div>
           <div className="space-y-2">
-            <Label>Videos <span className="text-muted-foreground font-normal">(max 5, up to 1 GB each)</span></Label>
+            <Label>Videos <span className="text-muted-foreground font-normal">(max {MAX_VIDEOS}, up to 1 GB each)</span></Label>
             <label className="flex items-center justify-center gap-2 w-full h-20 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors text-sm text-muted-foreground">
               <Video className="w-4 h-4" />
               Click to upload videos
               <input type="file" multiple accept="video/mp4,video/quicktime,video/webm,video/x-m4v,video/mpeg" className="hidden"
-                onChange={(e) => { setVideoFiles((prev) => [...prev, ...Array.from(e.target.files || [])].slice(0, 5)); e.target.value = ""; }} />
+                onChange={(e) => {
+                  const picked = Array.from(e.target.files ?? []);
+                  e.target.value = "";
+                  setVideoFiles((prev) => [...prev, ...picked].slice(0, MAX_VIDEOS));
+                }} />
             </label>
             {videoFiles.length > 0 && (
               <div className="space-y-1.5 mt-2">
