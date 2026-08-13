@@ -8,10 +8,11 @@ import { type BugStatus } from "@/lib/api";
 import { STATUS_STYLES, STATUS_ICONS } from "@/lib/bug-status";
 
 const GUIDE: { status: BugStatus; who: string; desc: string }[] = [
-  { status: "Open", who: "Tester", desc: "Tester has reported a bug that hasn't been fixed yet. The developer needs to investigate." },
-  { status: "Fixed", who: "Developer", desc: "Developer has fixed the bug and is asking the tester to verify the fix." },
-  { status: "Closed", who: "Tester", desc: "Tester has verified the fix and confirmed the bug is fully resolved." },
-  { status: "Invalid", who: "Developer", desc: "Developer has determined this is not a valid bug — cannot reproduce, out of scope, or working as intended." },
+  { status: "Open", who: "Anyone", desc: "A bug has been reported and is waiting for a developer to investigate." },
+  { status: "Fixed", who: "Developer", desc: "The developer believes it's resolved and is asking the tester to retest." },
+  { status: "Reopened", who: "Tester", desc: "The tester retested and the issue still occurs. It goes back to the developers." },
+  { status: "Closed", who: "Tester", desc: "The tester verified the fix and confirmed the bug is fully resolved." },
+  { status: "Invalid", who: "Developer", desc: "Not a valid bug — cannot reproduce, out of scope, or working as intended." },
 ];
 
 export function StatusGuideDialog({

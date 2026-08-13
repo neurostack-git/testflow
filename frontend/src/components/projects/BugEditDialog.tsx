@@ -9,13 +9,14 @@ import { Image, Upload, Video, X } from "lucide-react";
 import { bugsApi, attachmentsApi, uploadToS3, uploadToS3WithProgress, type Bug, type BugStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { trimName, displayFilename } from "@/lib/filenames";
-import { ALL_STATUSES, STATUS_STYLES, TESTER_TRANSITIONS } from "@/lib/bug-status";
+import { ALL_STATUSES, STATUS_STYLES, transitionsFor } from "@/lib/bug-status";
+import { isDeveloper, type Role } from "@/lib/permissions";
 
-function getEditableStatuses(bug: Bug, role: string): BugStatus[] {
-  if (role === "admin") return ALL_STATUSES;
-  const possible = TESTER_TRANSITIONS[bug.status] ?? [];
-  const current = ALL_STATUSES.includes(bug.status) ? bug.status : ("Open" as BugStatus);
-  return [current, ...possible].filter((s, i, a) => a.indexOf(s) === i);
+function getEditableStatuses(bug: Bug, role: Role): BugStatus[] {
+  if (isDeveloper(role)) return ALL_STATUSES;
+  // A Tester sees their current status plus whatever they may move it to.
+  return [bug.status, ...transitionsFor(role, bug.status)]
+    .filter((s, i, a) => a.indexOf(s) === i);
 }
 
 interface BugEditDialogProps {
@@ -23,7 +24,7 @@ interface BugEditDialogProps {
   onOpenChange: (open: boolean) => void;
   bug: Bug | null;
   projectId: string;
-  role: string;
+  role: Role;
   onUpdated: (bug: Bug) => void;
 }
 
@@ -130,7 +131,7 @@ export function BugEditDialog({ open, onOpenChange, bug, projectId, role, onUpda
                       status === s
                         ? STATUS_STYLES[s]
                         : s === "Invalid"
-                          ? "border-red-200 text-red-400 hover:bg-red-50"
+                          ? "border-red-200 text-red-400 hover:bg-red-50 dark:border-red-400/30 dark:text-red-400 dark:hover:bg-red-400/10"
                           : "border-border text-muted-foreground hover:bg-muted/50"
                     )}>
                     {s}

@@ -6,11 +6,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Trash2, RotateCcw, FolderOpen, AlertTriangle } from "lucide-react";
 import { projectsApi, type Project } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
+import { canRestoreProject } from "@/lib/permissions";
 import { Spinner } from "@/components/ui/spinner";
 
 export default function BinPage() {
-  const { user } = useAuth();
-  const role = user?.role ?? "tester";
+  const { role } = useAuth();
+  const canManage = canRestoreProject(role);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,7 +106,7 @@ export default function BinPage() {
                   <RotateCcw className="w-3.5 h-3.5" />
                   Restore
                 </Button>
-                {role === "admin" && (
+                {canManage && (
                   <Button
                     size="sm"
                     variant="outline"

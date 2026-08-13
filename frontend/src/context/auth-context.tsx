@@ -3,20 +3,25 @@
 import "@/lib/amplify";
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { getAuthUser, logoutUser, type AuthUser } from "@/lib/auth";
-import { usersApi, attachmentsApi } from "@/lib/api";
+import { getAuthUser, logoutUser, takePendingOrgName, type AuthUser } from "@/lib/auth";
+import { usersApi, attachmentsApi, orgApi, ApiError } from "@/lib/api";
+import type { Role } from "@/lib/permissions";
 
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
+  /** Authoritative role from the DynamoDB profile — NOT the JWT claim. */
+  role: Role;
+  orgId: string | null;
+  orgName: string | null;
+  /** True when the account exists but has no workspace yet (LLD §7.1). */
+  needsOrg: boolean;
   /** Resolved (presigned) avatar URL, fetched once per session. */
   avatarUrl: string | null;
-  /** Developer/admin name for testers, from the DynamoDB profile. */
-  adminName: string | null;
   refresh: () => Promise<void>;
-  /** Re-fetch the DynamoDB profile (avatar + adminName). */
   refreshProfile: () => Promise<void>;
-  /** Update the avatar URL locally so every consumer reacts instantly (no refetch). */
+  /** Create the workspace for a newly signed-up Owner. */
+  createOrg: (name: string) => Promise<void>;
   setAvatarUrl: (url: string | null) => void;
   logout: () => Promise<void>;
 }
@@ -27,24 +32,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [adminName, setAdminName] = useState<string | null>(null);
+  const [role, setRole] = useState<Role>("tester");
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const [orgName, setOrgName] = useState<string | null>(null);
+  const [needsOrg, setNeedsOrg] = useState(false);
   const router = useRouter();
 
   const refresh = useCallback(async () => {
     try {
-      const u = await getAuthUser();
-      setUser(u);
+      setUser(await getAuthUser());
     } catch {
       setUser(null);
     }
   }, []);
 
-  // Single source of truth for the DynamoDB profile (avatar + adminName).
-  // Fetched once when the user becomes known — not on every navigation.
+  /** The single source of truth for role, org and avatar.
+   *
+   *  A freshly confirmed Owner has a Cognito account but no profile row yet,
+   *  which the API reports as `org_not_provisioned`. If the signup form stashed
+   *  a workspace name we create it transparently; otherwise `needsOrg` sends
+   *  them to /onboarding to supply one.
+   */
   const refreshProfile = useCallback(async () => {
     try {
       const profile = await usersApi.me();
-      setAdminName(profile.adminName ?? null);
+      setRole(profile.role);
+      setOrgId(profile.orgId ?? null);
+      setOrgName(profile.orgName ?? null);
+      setNeedsOrg(false);
+
       if (profile.avatarKey) {
         try {
           const { url } = await attachmentsApi.viewUrl(profile.avatarKey, true);
@@ -55,10 +71,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setAvatarUrl(null);
       }
-    } catch {
-      /* keep existing values on failure */
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "org_not_provisioned") {
+        const pending = takePendingOrgName();
+        if (pending) {
+          try {
+            await orgApi.create(pending);
+            await refreshProfile();
+            return;
+          } catch {
+            /* fall through to the onboarding prompt */
+          }
+        }
+        setNeedsOrg(true);
+        return;
+      }
+      /* keep existing values on any other failure */
     }
   }, []);
+
+  const createOrg = useCallback(async (name: string) => {
+    await orgApi.create(name, user?.name);
+    setNeedsOrg(false);
+    await refreshProfile();
+  }, [user?.name, refreshProfile]);
 
   useEffect(() => {
     refresh().finally(() => setLoading(false));
@@ -70,22 +106,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshProfile();
     } else {
       setAvatarUrl(null);
-      setAdminName(null);
+      setOrgId(null);
+      setOrgName(null);
+      setNeedsOrg(false);
+      setRole("tester");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.sub]);
 
   const logout = useCallback(async () => {
     await logoutUser();
     setUser(null);
     setAvatarUrl(null);
-    setAdminName(null);
+    setOrgId(null);
+    setOrgName(null);
+    setNeedsOrg(false);
+    setRole("tester");
     router.push("/login");
   }, [router]);
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, avatarUrl, adminName, refresh, refreshProfile, setAvatarUrl, logout }}
+      value={{
+        user, loading, role, orgId, orgName, needsOrg, avatarUrl,
+        refresh, refreshProfile, createOrg, setAvatarUrl, logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

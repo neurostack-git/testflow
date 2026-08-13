@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Bug, CheckCircle, Users, Zap, Lock, Mail, User, Check, X } from "lucide-react";
+import { Bug, CheckCircle, Users, Zap, Lock, Mail, User, Check, X, Building2 } from "lucide-react";
 import Link from "next/link";
-import { registerAdmin, confirmUserSignUp, mapAuthError } from "@/lib/auth";
+import { registerOwner, confirmUserSignUp, mapAuthError } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { AnimatedBugLogo } from "@/components/ui/animated-bug-logo";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -21,6 +21,7 @@ export default function SignupPage() {
 
   // Register form state
   const [name, setName] = useState("");
+  const [orgName, setOrgName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -40,7 +41,8 @@ export default function SignupPage() {
     setError("");
     setLoading(true);
     try {
-      await registerAdmin(name, email, password);
+      // Stashes the workspace name for the post-login bootstrap (LLD §7.1).
+      await registerOwner(name, email, password, orgName.trim());
       setStep("verify");
     } catch (err: unknown) {
       setError(mapAuthError(err));
@@ -65,9 +67,9 @@ export default function SignupPage() {
 
   const features = [
     { icon: Bug, title: "Report bugs instantly", desc: "Screenshots, files, descriptions — in seconds." },
-    { icon: CheckCircle, title: "Track resolution status", desc: "Open → Fixed → Verified. Clear lifecycle." },
+    { icon: CheckCircle, title: "Track resolution status", desc: "Open → Fixed → Closed, or Reopened if it still fails." },
     { icon: Zap, title: "Get notified instantly", desc: "Email & WhatsApp when a bug is ready to retest." },
-    { icon: Users, title: "Invite your team", desc: "Create projects and add testers with one click." },
+    { icon: Users, title: "One workspace, one team", desc: "Developers and testers see every project." },
   ];
 
   return (
@@ -93,7 +95,7 @@ export default function SignupPage() {
               </span>
             </h1>
             <p className="text-white/75 text-lg leading-relaxed font-medium tf-fade-up" style={{ "--anim-delay": "340ms" } as React.CSSProperties}>
-              Create your admin account, set up projects, and invite testers in minutes.
+              Create your workspace, set up projects, and invite your team in minutes.
             </p>
           </div>
           <div className="space-y-5">
@@ -128,7 +130,9 @@ export default function SignupPage() {
             <div className="space-y-7">
               <div>
                 <h2 className="text-[1.9rem] font-extrabold text-foreground tracking-tight">Create account</h2>
-                <p className="text-muted-foreground mt-1.5 text-sm">You&apos;ll be set up as an Admin</p>
+                <p className="text-muted-foreground mt-1.5 text-sm">
+                  You&apos;ll own the workspace and can invite developers and testers
+                </p>
               </div>
               <form onSubmit={handleRegister} className="space-y-4">
                 <div className="space-y-1.5">
@@ -138,6 +142,16 @@ export default function SignupPage() {
                     <Input id="name" type="text" placeholder="Jane Smith" value={name}
                       onChange={(e) => setName(e.target.value)} className="h-11 pl-9 text-sm" required />
                   </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="orgName" className="text-sm font-semibold text-foreground">Workspace name</Label>
+                  <div className="relative">
+                    <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    <Input id="orgName" type="text" placeholder="Acme QA" value={orgName}
+                      onChange={(e) => setOrgName(e.target.value)} className="h-11 pl-9 text-sm"
+                      maxLength={60} required />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Your team and projects live here.</p>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="email" className="text-sm font-semibold text-foreground">Email</Label>
@@ -171,7 +185,7 @@ export default function SignupPage() {
                 </div>
                 <ErrorAlert message={error} className="bg-destructive/8 py-2.5 font-medium" />
                 <Button type="submit" className="w-full h-11 bg-primary hover:bg-primary/90 font-semibold text-sm tracking-wide"
-                  disabled={loading || passwordsMismatch}>
+                  disabled={loading || passwordsMismatch || !orgName.trim()}>
                   {loading ? "Creating account…" : "Create account"}
                 </Button>
               </form>

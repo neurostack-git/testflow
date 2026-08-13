@@ -30,6 +30,11 @@ class TestflowStack(Stack):
             sort_key=dynamodb.Attribute(name="SK", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=RemovalPolicy.RETAIN,
+            # 35-day continuous restore window. This was OFF during the
+            # 2026-08-13 reset, which is why that data was unrecoverable.
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True,
+            ),
             # Auto-expire ephemeral rows (WS connections, phone OTPs) that carry
             # an `expiresAt` epoch-seconds attribute. Other items omit it and persist.
             time_to_live_attribute="expiresAt",
@@ -48,6 +53,9 @@ class TestflowStack(Stack):
             "AttachmentsBucket",
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             encryption=s3.BucketEncryption.S3_MANAGED,
+            # Deleted objects become recoverable delete-markers rather than
+            # vanishing outright.
+            versioned=True,
             cors=[
                 s3.CorsRule(
                     allowed_methods=[s3.HttpMethods.PUT, s3.HttpMethods.GET],
@@ -176,19 +184,35 @@ class TestflowStack(Stack):
             "USER_POOL_CLIENT_ID": user_pool_client.user_pool_client_id,
         }
 
+        # ── Shared layer ───────────────────────────────────────────────────
+        # tfcommon holds the entire RBAC matrix and the bug transition table.
+        # Every function gets it so an authorisation rule exists in one place.
+        common_layer = lambda_.LayerVersion(
+            self,
+            "CommonLayer",
+            layer_version_name="testflow-common",
+            code=lambda_.Code.from_asset("layers/common"),
+            compatible_runtimes=[lambda_.Runtime.PYTHON_3_12],
+            description="Shared auth, DynamoDB and HTTP primitives for TestFlow",
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
         lambda_defaults = {
             "runtime": lambda_.Runtime.PYTHON_3_12,
             "timeout": Duration.seconds(30),
             "memory_size": 256,
+            "layers": [common_layer],
         }
 
         # ── Lambda functions ───────────────────────────────────────────────
-        auth_fn = lambda_.Function(
-            self, "AuthFn",
+        # `org` replaces the old `auth` function: it owns the workspace, its
+        # members and all invites (LLD §9.1).
+        org_fn = lambda_.Function(
+            self, "OrgFn",
             **lambda_defaults,
-            code=lambda_.Code.from_asset("lambdas/auth"),
+            code=lambda_.Code.from_asset("lambdas/org"),
             handler="handler.lambda_handler",
-            environment={**lambda_env, "AWS_ACCOUNT_ID": self.account},
+            environment=lambda_env,
         )
 
         projects_fn = lambda_.Function(
@@ -243,7 +267,7 @@ class TestflowStack(Stack):
         )
 
         # ── IAM permissions ────────────────────────────────────────────────
-        table.grant_read_write_data(auth_fn)
+        table.grant_read_write_data(org_fn)
         table.grant_read_write_data(post_auth_fn)
         table.grant_read_write_data(projects_fn)
 
@@ -255,6 +279,9 @@ class TestflowStack(Stack):
         table.grant_read_write_data(bugs_fn)
         table.grant_read_write_data(users_fn)
         table.grant_read_data(notifications_fn)
+        # attachments now authorises every key against the caller's org, so it
+        # needs to read profiles and project metadata.
+        table.grant_read_data(attachments_fn)
 
         bucket.grant_put(attachments_fn)
         bucket.grant_read(attachments_fn)
@@ -265,11 +292,13 @@ class TestflowStack(Stack):
         bucket.grant_delete(projects_fn)
         bucket.grant_delete(bugs_fn)
 
-        # Allow auth Lambda to create/admin Cognito users
-        auth_fn.add_to_role_policy(
+        # The org Lambda owns the full member lifecycle: invite creates the
+        # Cognito user, removal deletes it.
+        org_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=[
                     "cognito-idp:AdminCreateUser",
+                    "cognito-idp:AdminDeleteUser",
                     "cognito-idp:AdminSetUserPassword",
                     "cognito-idp:AdminUpdateUserAttributes",
                     "cognito-idp:AdminGetUser",
@@ -293,13 +322,7 @@ class TestflowStack(Stack):
             )
         )
 
-        # Allow projects Lambda to delete Cognito users (full tester removal)
-        projects_fn.add_to_role_policy(
-            iam.PolicyStatement(
-                actions=["cognito-idp:AdminDeleteUser"],
-                resources=[user_pool.user_pool_arn],
-            )
-        )
+        # projects no longer removes members — that moved to the org Lambda.
 
         # Allow users Lambda to update Cognito attributes and send SMS OTPs
         users_fn.add_to_role_policy(
@@ -423,17 +446,21 @@ class TestflowStack(Stack):
                     authorizer=jwt_authorizer,
                 )
 
-        # Auth (invite tester — no JWT needed on public invite endpoint? No, Admin must be authed)
-        add_routes("/auth/invite", auth_fn, [apigwv2.HttpMethod.POST])
+        # Org — workspace, members, invites, ownership (LLD §9.1)
+        add_routes("/org", org_fn, [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.PATCH])
+        add_routes("/org/members", org_fn, [apigwv2.HttpMethod.GET])
+        add_routes("/org/members/{sub}", org_fn, [apigwv2.HttpMethod.DELETE])
+        add_routes("/org/invite", org_fn, [apigwv2.HttpMethod.POST])
+        add_routes("/org/transfer-ownership", org_fn, [apigwv2.HttpMethod.POST])
 
-        # Projects
+        # Projects — org-scoped. The per-project /members routes are gone (D11).
         add_routes("/projects", projects_fn, [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST])
         add_routes("/projects/bin", projects_fn, [apigwv2.HttpMethod.GET])
-        add_routes("/projects/{projectId}", projects_fn, [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.DELETE])
+        add_routes("/projects/{projectId}", projects_fn, [
+            apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PATCH, apigwv2.HttpMethod.DELETE,
+        ])
         add_routes("/projects/{projectId}/restore", projects_fn, [apigwv2.HttpMethod.POST])
         add_routes("/projects/{projectId}/permanent", projects_fn, [apigwv2.HttpMethod.DELETE])
-        add_routes("/projects/{projectId}/members", projects_fn, [apigwv2.HttpMethod.GET])
-        add_routes("/projects/{projectId}/members/{memberId}", projects_fn, [apigwv2.HttpMethod.DELETE])
 
         # Bugs
         add_routes("/projects/{projectId}/bugs", bugs_fn, [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST])

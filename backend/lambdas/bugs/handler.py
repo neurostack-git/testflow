@@ -1,342 +1,358 @@
+"""Bug CRUD and the status lifecycle (LLD §8, §9.3).
+
+Access is org-scoped via `require_project`. The transition matrix itself lives
+in `tfcommon.bugs` so the client mirror has exactly one source to track.
+"""
+
 import json
 import os
-import uuid
+
 import boto3
 from boto3.dynamodb.conditions import Key
-from botocore.config import Config
-from datetime import datetime, timezone
 
-dynamodb = boto3.resource("dynamodb")
+from tfcommon.auth import get_caller, require_developer, require_project
+from tfcommon.bugs import (
+    INITIAL_STATUS,
+    STATUS_FIXED,
+    STATUS_REOPENED,
+    require_can_edit_bug,
+    require_transition,
+)
+from tfcommon.db import (
+    BUG_PREFIX,
+    PROFILE,
+    bug_sk,
+    get_item,
+    new_id,
+    notif_sk,
+    now_iso,
+    project_pk,
+    query_all,
+    table,
+    user_pk,
+)
+from tfcommon.http import ApiError, api_handler, json_body, not_found, required, response
+from tfcommon.org import list_developer_subs
+
 lambda_client = boto3.client("lambda")
-s3 = boto3.client("s3", config=Config(signature_version="s3v4"))
+s3 = boto3.client("s3")
 
-TABLE_NAME = os.environ["TABLE_NAME"]
 NOTIFICATIONS_FN_ARN = os.environ.get("NOTIFICATIONS_FN_ARN", "")
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
-table = dynamodb.Table(TABLE_NAME)
 
-_ALL = ["Open", "Fixed", "Closed", "Invalid"]
-
-VALID_TRANSITIONS = {
-    "admin": {
-        "Open":     ["Fixed", "Closed", "Invalid"],
-        "Fixed":    ["Open", "Closed", "Invalid"],
-        "Closed":   ["Open", "Fixed", "Invalid"],
-        "Invalid":  ["Open", "Fixed", "Closed"],
-        "Verified": ["Open", "Fixed", "Invalid"],          # legacy alias
-        "Reopen":   ["Open", "Fixed", "Closed", "Invalid"], # legacy alias
-    },
-    "tester": {
-        "Open":     ["Closed"],
-        "Fixed":    ["Closed", "Open"],
-        "Closed":   ["Open"],
-        "Invalid":  ["Closed", "Open"],
-        "Verified": ["Open"],           # legacy alias
-        "Reopen":   ["Closed"],         # legacy alias
-    },
-}
+MAX_TITLE = 120
+MAX_DESCRIPTION = 2000
+MAX_ATTACHMENTS = 3
 
 
-def response(status: int, body) -> dict:
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-        "body": json.dumps(body),
-    }
-
-
+@api_handler
 def lambda_handler(event: dict, context) -> dict:
     route = event.get("routeKey", "")
-    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
-    user_sub = claims.get("sub")
-    user_role = claims.get("custom:role", "tester")
-    path_params = event.get("pathParameters") or {}
-    project_id = path_params.get("projectId")
-    bug_id = path_params.get("bugId")
+    params = event.get("pathParameters") or {}
+    project_id = params.get("projectId")
+    bug_id = params.get("bugId")
+    caller = get_caller(event)
 
     if route == "GET /projects/{projectId}/bugs":
-        return list_bugs(project_id, user_sub, user_role)
+        return list_bugs(project_id, caller)
     if route == "POST /projects/{projectId}/bugs":
-        return create_bug(event, project_id, user_sub, user_role)
+        return create_bug(event, project_id, caller)
     if route == "GET /projects/{projectId}/bugs/{bugId}":
-        return get_bug(project_id, bug_id, user_sub, user_role)
+        return get_bug(project_id, bug_id, caller)
     if route == "PATCH /projects/{projectId}/bugs/{bugId}":
-        return update_bug(event, project_id, bug_id, user_sub, user_role)
+        return update_bug(event, project_id, bug_id, caller)
     if route == "PATCH /projects/{projectId}/bugs/{bugId}/status":
-        return update_status(event, project_id, bug_id, user_sub, user_role)
+        return update_status(event, project_id, bug_id, caller)
     if route == "DELETE /projects/{projectId}/bugs/{bugId}":
-        return delete_bug(project_id, bug_id, user_sub, user_role)
+        return delete_bug(project_id, bug_id, caller)
 
-    return response(404, {"error": "Not found"})
-
-
-def _check_project_access(project_id: str, user_sub: str, user_role: str) -> bool:
-    if user_role == "admin":
-        proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
-        return proj is not None
-    membership = table.get_item(
-        Key={"PK": f"PROJECT#{project_id}", "SK": f"MEMBER#{user_sub}"}
-    ).get("Item")
-    return membership is not None
+    return not_found()
 
 
-def list_bugs(project_id: str, user_sub: str, user_role: str) -> dict:
-    if not _check_project_access(project_id, user_sub, user_role):
-        return response(403, {"error": "Forbidden"})
+# ── Reads ────────────────────────────────────────────────────────────────────
 
-    bugs = []
-    last_key = None
-    while True:
-        kwargs = {
-            "KeyConditionExpression": Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("BUG#"),
-        }
-        if last_key:
-            kwargs["ExclusiveStartKey"] = last_key
-        result = table.query(**kwargs)
-        bugs.extend(result.get("Items", []))
-        last_key = result.get("LastEvaluatedKey")
-        if not last_key:
-            break
-
-    reporter_subs = list({b.get("reportedBy") for b in bugs if b.get("reportedBy")})
-    name_map = {}
-    if reporter_subs:
-        for i in range(0, len(reporter_subs), 100):
-            chunk = reporter_subs[i:i + 100]
-            batch_resp = dynamodb.batch_get_item(RequestItems={TABLE_NAME: {"Keys": [
-                {"PK": f"USER#{sub}", "SK": "PROFILE"} for sub in chunk
-            ]}})
-            for profile in batch_resp.get("Responses", {}).get(TABLE_NAME, []):
-                sub = profile["PK"].replace("USER#", "")
-                name_map[sub] = profile.get("name") or profile.get("email", "").split("@")[0] or sub[:8]
-    for bug in bugs:
-        bug["reporterName"] = name_map.get(bug.get("reportedBy", ""), "Unknown")
-
+def list_bugs(project_id: str, caller) -> dict:
+    require_project(caller, project_id)
+    bugs = query_all(
+        KeyConditionExpression=Key("PK").eq(project_pk(project_id))
+        & Key("SK").begins_with(BUG_PREFIX),
+    )
+    _attach_reporter_names(bugs)
+    bugs.sort(key=lambda b: b.get("createdAt", ""), reverse=True)
     return response(200, {"bugs": bugs})
 
 
-def create_bug(event: dict, project_id: str, user_sub: str, user_role: str) -> dict:
-    if not _check_project_access(project_id, user_sub, user_role):
-        return response(403, {"error": "Forbidden"})
+def get_bug(project_id: str, bug_id: str, caller) -> dict:
+    require_project(caller, project_id)
+    bug = _load_bug(project_id, bug_id)
+    _attach_reporter_names([bug])
+    return response(200, bug)
 
-    body = json.loads(event.get("body") or "{}")
-    title = body.get("title", "").strip()
-    description = body.get("description", "").strip()
-    screenshots = body.get("screenshots", [])[:10]
-    documents = body.get("documents", [])[:3]
-    videos = body.get("videos", [])[:5]
 
-    if not title:
-        return response(400, {"error": "title is required"})
-    if len(title) > 500:
-        return response(400, {"error": "Title must be 500 characters or fewer"})
-    if len(description) > 10000:
-        return response(400, {"error": "Description must be 10,000 characters or fewer"})
+def _load_bug(project_id: str, bug_id: str) -> dict:
+    if not bug_id:
+        raise ApiError(400, "'bugId' is required.", "missing_field")
+    bug = get_item(project_pk(project_id), bug_sk(bug_id))
+    if not bug:
+        raise ApiError(404, "Bug not found.", "not_found")
+    return bug
 
-    bug_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
 
-    item = {
-        "PK": f"PROJECT#{project_id}",
-        "SK": f"BUG#{bug_id}",
+def _attach_reporter_names(bugs: list) -> None:
+    """Resolve reporter display names, including tombstoned members (D17)."""
+    subs = {b.get("reportedBy") for b in bugs if b.get("reportedBy")}
+    names = {}
+    for sub in subs:
+        profile = get_item(user_pk(sub), PROFILE)
+        if not profile:
+            continue
+        name = profile.get("name") or profile.get("email", "")
+        names[sub] = f"{name} (removed)" if profile.get("deleted") else name
+    for bug in bugs:
+        bug["reporterName"] = names.get(bug.get("reportedBy"), "")
+
+
+# ── Writes ───────────────────────────────────────────────────────────────────
+
+def create_bug(event: dict, project_id: str, caller) -> dict:
+    """Any role may file a bug, and it always starts Open."""
+    project = require_project(caller, project_id)
+    body = json_body(event)
+    (title, description) = required(body, "title", "description")
+    _check_lengths(title, description)
+
+    screenshots = _check_attachments(body.get("screenshots"), "screenshots")
+    videos = _check_attachments(body.get("videos"), "videos")
+    documents = _check_attachments(body.get("documents"), "documents")
+
+    bug_id = new_id()
+    now = now_iso()
+    bug = {
+        "PK": project_pk(project_id),
+        "SK": bug_sk(bug_id),
         "bugId": bug_id,
         "projectId": project_id,
         "title": title,
         "description": description,
+        "status": INITIAL_STATUS,
+        "reportedBy": caller.sub,
         "screenshots": screenshots,
-        "documents": documents,
         "videos": videos,
-        "status": "Open",
-        "reportedBy": user_sub,
+        "documents": documents,
         "createdAt": now,
         "updatedAt": now,
     }
-    table.put_item(Item=item)
+    table.put_item(Item=bug)
 
-    return response(201, item)
-
-
-def get_bug(project_id: str, bug_id: str, user_sub: str, user_role: str) -> dict:
-    if not _check_project_access(project_id, user_sub, user_role):
-        return response(403, {"error": "Forbidden"})
-
-    item = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"BUG#{bug_id}"}).get("Item")
-    if not item:
-        return response(404, {"error": "Bug not found"})
-
-    return response(200, item)
-
-
-def update_bug(event: dict, project_id: str, bug_id: str, user_sub: str, user_role: str) -> dict:
-    if not _check_project_access(project_id, user_sub, user_role):
-        return response(403, {"error": "Forbidden"})
-
-    bug = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"BUG#{bug_id}"}).get("Item")
-    if not bug:
-        return response(404, {"error": "Bug not found"})
-
-    if user_role == "tester" and bug.get("reportedBy") != user_sub:
-        return response(403, {"error": "Forbidden"})
-
-    body = json.loads(event.get("body") or "{}")
-    title = body.get("title", bug.get("title", "")).strip()
-    description = body.get("description", bug.get("description", "")).strip()
-    new_status = body.get("status")
-
-    if not title:
-        return response(400, {"error": "title is required"})
-    if len(title) > 500:
-        return response(400, {"error": "Title must be 500 characters or fewer"})
-    if len(description) > 10000:
-        return response(400, {"error": "Description must be 10,000 characters or fewer"})
-
-    if new_status and new_status != bug.get("status"):
-        if user_role == "admin":
-            if new_status not in _ALL:
-                return response(400, {"error": "Invalid status"})
-        else:
-            current_status = bug.get("status", "")
-            allowed = VALID_TRANSITIONS.get(user_role, {}).get(current_status, [])
-            if new_status not in allowed:
-                return response(400, {"error": f"Cannot transition to {new_status}"})
-
-    if not new_status or new_status == bug.get("status"):
-        new_status = bug.get("status")
-
-    now = datetime.now(timezone.utc).isoformat()
-    expr_names = {}
-    expr_values = {":t": title, ":d": description, ":ts": now, ":s": new_status}
-    expr_names["#s"] = "status"
-    update_parts = ["title = :t", "description = :d", "#s = :s", "updatedAt = :ts"]
-
-    # Handle screenshots: delete removed S3 keys, update list
-    new_screenshots = None
-    if "screenshots" in body:
-        new_screenshots = body["screenshots"]
-        old_screenshots = bug.get("screenshots", [])
-        removed_keys = [k for k in old_screenshots if k not in new_screenshots]
-        for key in removed_keys:
-            if BUCKET_NAME and key:
-                try:
-                    s3.delete_object(Bucket=BUCKET_NAME, Key=key)
-                except Exception:
-                    pass
-        expr_values[":sc"] = new_screenshots
-        update_parts.append("screenshots = :sc")
-
-    new_videos = None
-    if "videos" in body:
-        new_videos = body["videos"]
-        old_videos = bug.get("videos", [])
-        removed_video_keys = [k for k in old_videos if k not in new_videos]
-        for key in removed_video_keys:
-            if BUCKET_NAME and key:
-                try:
-                    s3.delete_object(Bucket=BUCKET_NAME, Key=key)
-                except Exception:
-                    pass
-        expr_values[":vd"] = new_videos
-        update_parts.append("videos = :vd")
-
-    update_kwargs = {
-        "Key": {"PK": f"PROJECT#{project_id}", "SK": f"BUG#{bug_id}"},
-        "UpdateExpression": "SET " + ", ".join(update_parts),
-        "ExpressionAttributeValues": expr_values,
-        "ExpressionAttributeNames": expr_names,
-    }
-
-    table.update_item(**update_kwargs)
-
-    # Trigger notification if newly marked Fixed
-    if new_status == "Fixed" and bug.get("status") != "Fixed" and NOTIFICATIONS_FN_ARN:
-        reporter_sub = bug.get("reportedBy")
-        reporter = table.get_item(Key={"PK": f"USER#{reporter_sub}", "SK": "PROFILE"}).get("Item", {})
-        proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item", {})
-        lambda_client.invoke(
-            FunctionName=NOTIFICATIONS_FN_ARN,
-            InvocationType="Event",
-            Payload=json.dumps({
-                "type": "BUG_FIXED",
-                "bugTitle": bug.get("title"),
-                "projectTitle": proj.get("title"),
-                "reporterEmail": reporter.get("email"),
-                "reporterPhone": reporter.get("phone"),
-                "bugId": bug_id,
-                "projectId": project_id,
-            }).encode(),
-        )
-
-    updated = {**bug, "title": title, "description": description, "status": new_status, "updatedAt": now}
-    if new_screenshots is not None:
-        updated["screenshots"] = new_screenshots
-    if new_videos is not None:
-        updated["videos"] = new_videos
-    return response(200, updated)
-
-
-def update_status(event: dict, project_id: str, bug_id: str, user_sub: str, user_role: str) -> dict:
-    if not _check_project_access(project_id, user_sub, user_role):
-        return response(403, {"error": "Forbidden"})
-
-    body = json.loads(event.get("body") or "{}")
-    new_status = body.get("status", "")
-
-    bug = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"BUG#{bug_id}"}).get("Item")
-    if not bug:
-        return response(404, {"error": "Bug not found"})
-
-    if user_role == "tester" and bug.get("reportedBy") != user_sub:
-        return response(403, {"error": "Forbidden"})
-
-    current_status = bug.get("status", "")
-    allowed = VALID_TRANSITIONS.get(user_role, {}).get(current_status, [])
-    if new_status not in allowed:
-        return response(400, {"error": f"Cannot transition from {current_status} to {new_status} as {user_role}"})
-
-    now = datetime.now(timezone.utc).isoformat()
-    table.update_item(
-        Key={"PK": f"PROJECT#{project_id}", "SK": f"BUG#{bug_id}"},
-        UpdateExpression="SET #s = :s, updatedAt = :ts",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={":s": new_status, ":ts": now},
+    # In-app only — email on every filed bug is noise on an active project.
+    _notify_developers(
+        caller,
+        project,
+        title=f"New bug: {title}",
+        notif_type="bug_created",
+        project_id=project_id,
     )
 
-    if new_status == "Fixed" and NOTIFICATIONS_FN_ARN:
-        reporter_sub = bug.get("reportedBy")
-        reporter = table.get_item(Key={"PK": f"USER#{reporter_sub}", "SK": "PROFILE"}).get("Item", {})
-        proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item", {})
+    bug["reporterName"] = caller.email
+    return response(201, bug)
+
+
+def update_bug(event: dict, project_id: str, bug_id: str, caller) -> dict:
+    require_project(caller, project_id)
+    bug = _load_bug(project_id, bug_id)
+    require_can_edit_bug(caller, bug)   # Testers may edit only their own (D10)
+
+    body = json_body(event)
+    updates = {}
+
+    if "title" in body:
+        title = (body.get("title") or "").strip()
+        if not title:
+            raise ApiError(400, "'title' is required.", "missing_field")
+        _check_lengths(title, None)
+        updates["title"] = title
+
+    if "description" in body:
+        description = (body.get("description") or "").strip()
+        if not description:
+            raise ApiError(400, "'description' is required.", "missing_field")
+        _check_lengths(None, description)
+        updates["description"] = description
+
+    for field in ("screenshots", "videos", "documents"):
+        if field in body:
+            updates[field] = _check_attachments(body.get(field), field)
+
+    if not updates:
+        raise ApiError(400, "Nothing to update.", "no_changes")
+
+    # Objects dropped from an attachment list are removed from S3 too.
+    removed = []
+    for field in ("screenshots", "videos", "documents"):
+        if field in updates:
+            removed.extend(set(bug.get(field) or []) - set(updates[field]))
+    _delete_s3_objects(removed)
+
+    updates["updatedAt"] = now_iso()
+    names = {f"#{k}": k for k in updates}
+    values = {f":{k}": v for k, v in updates.items()}
+    table.update_item(
+        Key={"PK": project_pk(project_id), "SK": bug_sk(bug_id)},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in updates),
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues=values,
+    )
+
+    bug.update(updates)
+    _attach_reporter_names([bug])
+    return response(200, bug)
+
+
+def update_status(event: dict, project_id: str, bug_id: str, caller) -> dict:
+    project = require_project(caller, project_id)
+    bug = _load_bug(project_id, bug_id)
+
+    body = json_body(event)
+    (target,) = required(body, "status")
+    current = bug.get("status", INITIAL_STATUS)
+    require_transition(caller, current, target)   # LLD §8.3
+
+    now = now_iso()
+    table.update_item(
+        Key={"PK": project_pk(project_id), "SK": bug_sk(bug_id)},
+        UpdateExpression="SET #s = :s, updatedAt = :now",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": target, ":now": now},
+    )
+
+    if target == STATUS_FIXED:
+        _notify_reporter_fixed(bug, project)
+    elif target == STATUS_REOPENED:
+        _notify_developers(
+            caller,
+            project,
+            title=f"Reopened: {bug.get('title', '')}",
+            notif_type="bug_reopened",
+            project_id=project_id,
+            email=True,
+        )
+
+    return response(200, {"status": target, "updatedAt": now})
+
+
+def delete_bug(project_id: str, bug_id: str, caller) -> dict:
+    require_project(caller, project_id)
+    bug = _load_bug(project_id, bug_id)
+    require_can_edit_bug(caller, bug)   # Testers may delete only their own (D10)
+
+    keys = []
+    for field in ("screenshots", "videos", "documents"):
+        keys.extend(bug.get(field) or [])
+    _delete_s3_objects(keys)
+
+    table.delete_item(Key={"PK": project_pk(project_id), "SK": bug_sk(bug_id)})
+    return response(200, {"bugId": bug_id})
+
+
+# ── Validation ───────────────────────────────────────────────────────────────
+
+def _check_lengths(title, description) -> None:
+    if title is not None and len(title) > MAX_TITLE:
+        raise ApiError(400, f"Title must be {MAX_TITLE} characters or fewer.", "title_too_long")
+    if description is not None and len(description) > MAX_DESCRIPTION:
+        raise ApiError(
+            400, f"Description must be {MAX_DESCRIPTION} characters or fewer.", "description_too_long"
+        )
+
+
+def _check_attachments(value, field: str) -> list:
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(not isinstance(v, str) for v in value):
+        raise ApiError(400, f"'{field}' must be a list of S3 keys.", "bad_attachments")
+    if len(value) > MAX_ATTACHMENTS:
+        raise ApiError(
+            400, f"At most {MAX_ATTACHMENTS} {field} are allowed.", "attachment_limit"
+        )
+    return value
+
+
+def _delete_s3_objects(keys: list) -> None:
+    if not keys or not BUCKET_NAME:
+        return
+    objects = [{"Key": k} for k in dict.fromkeys(keys) if k]
+    if not objects:
+        return
+    try:
+        s3.delete_objects(Bucket=BUCKET_NAME, Delete={"Objects": objects})
+    except Exception as err:  # noqa: BLE001
+        print(f"S3 delete failed: {err}")
+
+
+# ── Notifications (LLD §12) ──────────────────────────────────────────────────
+
+def _notify_reporter_fixed(bug: dict, project: dict) -> None:
+    """Fixed → the reporting Tester, by email and WhatsApp."""
+    reporter = get_item(user_pk(bug.get("reportedBy", "")), PROFILE)
+    if not reporter or reporter.get("deleted") or not NOTIFICATIONS_FN_ARN:
+        return
+    try:
         lambda_client.invoke(
             FunctionName=NOTIFICATIONS_FN_ARN,
             InvocationType="Event",
             Payload=json.dumps({
                 "type": "BUG_FIXED",
+                "bugId": bug.get("bugId"),
                 "bugTitle": bug.get("title"),
-                "projectTitle": proj.get("title"),
+                "projectId": project.get("projectId"),
+                "projectTitle": project.get("title"),
                 "reporterEmail": reporter.get("email"),
                 "reporterPhone": reporter.get("phone"),
-                "bugId": bug_id,
-                "projectId": project_id,
-            }).encode(),
+            }),
         )
+    except Exception as err:  # noqa: BLE001
+        print(f"Notification invoke failed: {err}")
 
-    return response(200, {"status": new_status, "updatedAt": now})
 
+def _notify_developers(caller, project: dict, *, title: str, notif_type: str,
+                       project_id: str, email: bool = False) -> None:
+    """Fan out to Owner + Developers (AP-7), excluding the actor."""
+    now = now_iso()
+    recipients = [s for s in list_developer_subs(caller.org_id) if s != caller.sub]
 
-def delete_bug(project_id: str, bug_id: str, user_sub: str, user_role: str) -> dict:
-    if not _check_project_access(project_id, user_sub, user_role):
-        return response(403, {"error": "Forbidden"})
+    with table.batch_writer() as batch:
+        for sub in recipients:
+            notif_id = new_id()
+            batch.put_item(Item={
+                "PK": user_pk(sub),
+                "SK": notif_sk(now, notif_id),
+                "notifId": notif_id,
+                "type": notif_type,
+                "projectId": project_id,
+                "projectTitle": project.get("title", ""),
+                "fromName": caller.email,
+                "content": title,
+                "read": False,
+                "createdAt": now,
+            })
 
-    bug = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"BUG#{bug_id}"}).get("Item")
-    if not bug:
-        return response(404, {"error": "Bug not found"})
-
-    if BUCKET_NAME:
-        for key in bug.get("screenshots", []) + bug.get("documents", []) + bug.get("videos", []):
-            if key:
-                try:
-                    s3.delete_object(Bucket=BUCKET_NAME, Key=key)
-                except Exception:
-                    pass
-
-    table.delete_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"BUG#{bug_id}"})
-    return response(200, {"message": "Bug deleted"})
+    if email and NOTIFICATIONS_FN_ARN and recipients:
+        emails = []
+        for sub in recipients:
+            profile = get_item(user_pk(sub), PROFILE)
+            if profile and profile.get("email") and not profile.get("deleted"):
+                emails.append(profile["email"])
+        if emails:
+            try:
+                lambda_client.invoke(
+                    FunctionName=NOTIFICATIONS_FN_ARN,
+                    InvocationType="Event",
+                    Payload=json.dumps({
+                        "type": "BUG_REOPENED",
+                        "bugTitle": title,
+                        "projectTitle": project.get("title", ""),
+                        "recipientEmails": emails,
+                    }),
+                )
+            except Exception as err:  # noqa: BLE001
+                print(f"Notification invoke failed: {err}")

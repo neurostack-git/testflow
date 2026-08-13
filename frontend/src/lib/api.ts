@@ -1,5 +1,21 @@
 import { config } from "@/lib/config";
 import { getJwt } from "@/lib/auth";
+import type { Role } from "@/lib/permissions";
+
+/** Error carrying the server's machine-readable `code` (LLD §9.6).
+ *  The auth context switches on `org_not_provisioned` to run the workspace
+ *  bootstrap, so the code must survive the throw. */
+export class ApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+    this.status = status;
+  }
+}
 
 async function request<T>(
   path: string,
@@ -17,18 +33,56 @@ async function request<T>(
       },
     });
   } catch {
-    throw new Error("Unable to connect. Please check your internet connection.");
+    throw new ApiError(
+      "Unable to connect. Please check your internet connection.",
+      "network_error",
+      0
+    );
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     const serverMsg = body.error as string | undefined;
-    if (serverMsg && serverMsg !== "Forbidden") throw new Error(serverMsg);
-    if (res.status === 403) throw new Error("You don't have permission to do that.");
-    if (res.status >= 500) throw new Error("Something went wrong on our end. Please try again.");
-    throw new Error(serverMsg || "Something went wrong. Please try again.");
+    const code = (body.code as string | undefined) ?? "error";
+    let message = serverMsg;
+    if (!message || message === "Forbidden") {
+      if (res.status === 403) message = "You don't have permission to do that.";
+      else if (res.status >= 500) message = "Something went wrong on our end. Please try again.";
+      else message = "Something went wrong. Please try again.";
+    }
+    throw new ApiError(message, code, res.status);
   }
   return res.json();
 }
+
+// ── Org ───────────────────────────────────────────────────────────────────────
+
+export const orgApi = {
+  /** Workspace bootstrap — called once, right after the Owner's first login. */
+  create: (name: string, ownerName?: string) =>
+    request<{ orgId: string; name: string; role: Role }>("/org", {
+      method: "POST",
+      body: JSON.stringify({ name, ownerName }),
+    }),
+  get: () => request<Org>("/org"),
+  rename: (name: string) =>
+    request<{ orgId: string; name: string }>("/org", {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+  listMembers: () => request<{ members: OrgMember[] }>("/org/members"),
+  invite: (email: string, role: Role) =>
+    request<OrgMember>("/org/invite", {
+      method: "POST",
+      body: JSON.stringify({ email, role }),
+    }),
+  removeMember: (sub: string) =>
+    request<{ removed: string }>(`/org/members/${sub}`, { method: "DELETE" }),
+  transferOwnership: (toSub: string) =>
+    request<{ ownerSub: string }>("/org/transfer-ownership", {
+      method: "POST",
+      body: JSON.stringify({ toSub }),
+    }),
+};
 
 // ── Projects ──────────────────────────────────────────────────────────────────
 
@@ -41,6 +95,11 @@ export const projectsApi = {
     }),
   get: (projectId: string) =>
     request<Project>(`/projects/${projectId}`),
+  rename: (projectId: string, title: string) =>
+    request<Project>(`/projects/${projectId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
   softDelete: (projectId: string) =>
     request(`/projects/${projectId}`, { method: "DELETE" }),
   listBin: () => request<{ projects: Project[] }>("/projects/bin"),
@@ -48,10 +107,6 @@ export const projectsApi = {
     request(`/projects/${projectId}/restore`, { method: "POST" }),
   permanentDelete: (projectId: string) =>
     request(`/projects/${projectId}/permanent`, { method: "DELETE" }),
-  listMembers: (projectId: string) =>
-    request<{ members: Member[] }>(`/projects/${projectId}/members`),
-  removeMember: (projectId: string, memberId: string) =>
-    request(`/projects/${projectId}/members/${memberId}`, { method: "DELETE" }),
   listReports: (projectId: string) =>
     request<{ reports: ProjectReport[] }>(`/projects/${projectId}/reports`),
   saveReport: (projectId: string, payload: SaveReportPayload) =>
@@ -157,16 +212,6 @@ export const notificationsApi = {
   clearAll: () => request("/notifications", { method: "DELETE" }),
 };
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-
-export const authApi = {
-  inviteTester: (email: string, projectId: string) =>
-    request("/auth/invite", {
-      method: "POST",
-      body: JSON.stringify({ email, projectId }),
-    }),
-};
-
 // ── Users ─────────────────────────────────────────────────────────────────────
 
 export const usersApi = {
@@ -199,15 +244,34 @@ export const usersApi = {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type BugStatus = "Open" | "Fixed" | "Closed" | "Invalid";
+export type BugStatus = "Open" | "Fixed" | "Reopened" | "Closed" | "Invalid";
+
+export interface Org {
+  orgId: string;
+  name: string;
+  ownerSub: string;
+  memberCount: number;
+}
+
+export interface OrgMember {
+  sub: string;
+  email: string;
+  name: string;
+  role: Role;
+  /** "pending" until they complete their first sign-in. */
+  status: "active" | "pending";
+  joinedAt: string;
+}
 
 export interface Project {
   projectId: string;
+  orgId: string;
   title: string;
+  createdBy: string;
   createdAt: string;
-  testerCount?: number;
+  /** Org-wide member count — identical for every project under the org model. */
+  memberCount?: number;
   deletedAt?: string;
-  adminName?: string;
 }
 
 export interface Bug {
@@ -249,19 +313,14 @@ export interface PresignPayload {
   uploadType?: "bug" | "report";
 }
 
-export interface Member {
-  memberId: string;
-  email: string;
-  name: string;
-  joinedAt: string;
-}
-
 export interface UserProfile {
   email: string;
   name: string;
   phone: string;
-  role: "admin" | "tester";
-  adminName?: string;
+  role: Role;
+  orgId: string;
+  orgName: string;
+  isOwner: boolean;
   avatarKey?: string;
 }
 
@@ -286,7 +345,7 @@ export interface ChatMessage {
   projectId: string;
   senderSub: string;
   senderName: string;
-  senderRole: "admin" | "tester";
+  senderRole: Role;
   content: string;
   mentions: string[];
   createdAt: string;
@@ -295,14 +354,14 @@ export interface ChatMessage {
 export interface ChatMember {
   sub: string;
   name: string;
-  role: "admin" | "tester";
+  role: Role;
   avatarKey?: string;
 }
 
 export interface AppNotification {
   notifId: string;
   SK: string;
-  type: "mention" | "message";
+  type: "mention" | "message" | "bug_created" | "bug_reopened";
   projectId: string;
   projectTitle: string;
   fromName: string;

@@ -8,14 +8,15 @@ import { cn } from "@/lib/utils";
 import { type Bug, type BugStatus } from "@/lib/api";
 import { ALL_STATUSES } from "@/lib/bug-status";
 import { StatusBadge } from "@/components/projects/StatusBadge";
+import { isDeveloper, type Role } from "@/lib/permissions";
 
 type SummaryFilter = "unsolved" | "today" | null;
 
-const TAB_KEYS = ["All", "Open", "Fixed", "Closed", "Invalid"] as const;
+const TAB_KEYS = ["All", "Open", "Fixed", "Reopened", "Closed", "Invalid"] as const;
 
 interface BugTableProps {
   bugs: Bug[];
-  role: "admin" | "tester";
+  role: Role;
   transitions: Record<string, BugStatus[]>;
   activeTab: string;
   summaryFilter: SummaryFilter;
@@ -51,25 +52,19 @@ export function BugTable({
 
   // All five tab counts in a single pass.
   const tabCounts = useMemo(() => {
-    const counts: Record<string, number> = { All: bugs.length, Open: 0, Fixed: 0, Closed: 0, Invalid: 0 };
-    for (const b of bugs) {
-      const s = b.status as string;
-      if (s === "Open" || s === "Reopen") counts.Open++;
-      else if (s === "Closed" || s === "Verified") counts.Closed++;
-      else if (s === "Fixed") counts.Fixed++;
-      else if (s === "Invalid") counts.Invalid++;
-    }
+    const counts: Record<string, number> = {
+      All: bugs.length, Open: 0, Fixed: 0, Reopened: 0, Closed: 0, Invalid: 0,
+    };
+    for (const b of bugs) counts[b.status] = (counts[b.status] ?? 0) + 1;
     return counts;
   }, [bugs]);
 
   const filteredBugs = useMemo(() => {
     const todayStr = new Date().toDateString();
-    const tabFiltered = activeTab === "All" ? bugs
-      : activeTab === "Open" ? bugs.filter((b) => b.status === "Open" || (b.status as string) === "Reopen")
-      : activeTab === "Closed" ? bugs.filter((b) => b.status === "Closed" || (b.status as string) === "Verified")
-      : bugs.filter((b) => b.status === activeTab);
+    const tabFiltered = activeTab === "All" ? bugs : bugs.filter((b) => b.status === activeTab);
+    // "Unsolved" = anything still needing work: filed, awaiting retest, or failed retest.
     const summaryFiltered = summaryFilter === "unsolved"
-      ? tabFiltered.filter((b) => b.status === "Open" || b.status === "Fixed")
+      ? tabFiltered.filter((b) => b.status === "Open" || b.status === "Fixed" || b.status === "Reopened")
       : summaryFilter === "today"
       ? tabFiltered.filter((b) => new Date(b.createdAt).toDateString() === todayStr)
       : tabFiltered;
@@ -106,7 +101,7 @@ export function BugTable({
                 {tab}
                 <span className={cn(
                   "inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none min-w-[18px]",
-                  isActive ? "bg-white/25 text-primary-foreground dark:bg-black/20" : "bg-muted text-muted-foreground"
+                  isActive ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"
                 )}>
                   {count}
                 </span>
@@ -118,7 +113,7 @@ export function BugTable({
           size="sm"
           onClick={onOpenNewBug}
           className={cn("shrink-0", role === "tester" ? "bg-primary hover:bg-primary/90 gap-1.5" : "gap-1.5")}
-          variant={role === "admin" ? "outline" : "default"}
+          variant={isDeveloper(role) ? "outline" : "default"}
         >
           <Plus className="w-3.5 h-3.5" />
           {role === "tester" ? "Report Bug" : "Add Row"}
@@ -160,7 +155,7 @@ export function BugTable({
           </TableHeader>
           <TableBody>
             {filteredBugs.map((bug) => {
-              const isClosed = bug.status === "Closed" || (bug.status as string) === "Verified";
+              const isClosed = bug.status === "Closed";
               const isInvalid = bug.status === "Invalid";
               const attachmentCount = bug.screenshots.length + bug.documents.length + (bug.videos?.length ?? 0);
               const validTransitions = transitions[bug.status] ?? [];
@@ -173,14 +168,14 @@ export function BugTable({
                   className="cursor-pointer hover:bg-muted/30 transition-colors"
                   onClick={() => onOpenBug(bug)}
                 >
-                  <TableCell className={cn("pl-5 font-medium", isClosed ? "line-through text-muted-foreground" : isInvalid ? "text-red-500" : "text-foreground")}>{bug.title}</TableCell>
-                  <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-400" : "text-muted-foreground")}>{bug.reporterName ?? bug.reportedBy.slice(0, 8) + "…"}</TableCell>
-                  <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-400" : "text-muted-foreground")}>
+                  <TableCell className={cn("pl-5 font-medium", isClosed ? "line-through text-muted-foreground" : isInvalid ? "text-red-600 dark:text-red-400" : "text-foreground")}>{bug.title}</TableCell>
+                  <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-500/80 dark:text-red-400/90" : "text-muted-foreground")}>{bug.reporterName ?? bug.reportedBy.slice(0, 8) + "…"}</TableCell>
+                  <TableCell className={cn("text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-500/80 dark:text-red-400/90" : "text-muted-foreground")}>
                     {new Date(bug.createdAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     {attachmentCount > 0 ? (
-                      <div className={cn("flex items-center gap-1 text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-400" : "text-muted-foreground")}>
+                      <div className={cn("flex items-center gap-1 text-sm", isClosed ? "line-through text-muted-foreground/60" : isInvalid ? "text-red-500/80 dark:text-red-400/90" : "text-muted-foreground")}>
                         <Image className="w-3.5 h-3.5" />
                         {attachmentCount}
                       </div>

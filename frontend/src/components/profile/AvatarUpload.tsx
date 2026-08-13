@@ -241,7 +241,7 @@ export function AvatarUpload({ avatarUrl, name, onAvatarChange }: AvatarUploadPr
                   disabled={uploading}
                 >
                   {uploading ? (
-                    <><div className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" /> Uploading…</>
+                    <><div className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" /> Uploading…</>
                   ) : "Save Photo"}
                 </Button>
               </div>

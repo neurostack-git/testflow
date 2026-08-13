@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 type Theme = "light" | "dark";
 
 // Routes that must ALWAYS render in light mode regardless of stored preference.
-const LIGHT_LOCKED = ["/", "/login", "/signup", "/onboarding"];
+const LIGHT_LOCKED = ["/", "/login", "/signup", "/onboarding", "/forgot-password"];
 
 const STORAGE_KEY = "tf-theme";
 

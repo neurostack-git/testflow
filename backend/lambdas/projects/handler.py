@@ -1,499 +1,264 @@
-import json
+"""Projects, Bin and Reports — all org-scoped (LLD §9.2).
+
+Every project belongs to an org, and every org member sees every project. The
+old per-project membership fan-out (`_auto_add_existing_testers`, the
+`MEMBER#`-driven tester branch of `list_projects`, and the `/members` routes)
+is gone: visibility is now a single `orgId` comparison.
+"""
+
 import os
-import uuid
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+
 import boto3
 from boto3.dynamodb.conditions import Key
-from botocore.config import Config
 
-dynamodb = boto3.resource("dynamodb")
-TABLE_NAME = os.environ["TABLE_NAME"]
-table = dynamodb.Table(TABLE_NAME)
-cognito = boto3.client("cognito-idp")
+from tfcommon.auth import get_caller, require_developer, require_org, require_project
+from tfcommon.db import (
+    BUG_PREFIX,
+    GSI1,
+    METADATA,
+    REPORT_PREFIX,
+    delete_all,
+    get_item,
+    new_id,
+    now_iso,
+    org_pk,
+    project_pk,
+    project_sk,
+    query_all,
+    report_sk,
+    table,
+)
+from tfcommon.http import ApiError, api_handler, json_body, not_found, required, response
+from tfcommon.org import list_members
 
-s3 = boto3.client("s3", config=Config(signature_version="s3v4"))
+s3 = boto3.client("s3")
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
-USER_POOL_ID = os.environ.get("USER_POOL_ID", "")
+
+MAX_TITLE = 80
+MAX_REPORTS = 5
 
 
-def response(status: int, body) -> dict:
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-        "body": json.dumps(body),
-    }
-
-
+@api_handler
 def lambda_handler(event: dict, context) -> dict:
     route = event.get("routeKey", "")
-    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
-    user_sub = claims.get("sub")
-    user_role = claims.get("custom:role", "tester")
-    path_params = event.get("pathParameters") or {}
+    params = event.get("pathParameters") or {}
+    project_id = params.get("projectId")
+    caller = get_caller(event)
 
     if route == "GET /projects":
-        return list_projects(user_sub, user_role)
+        return list_projects(caller)
     if route == "POST /projects":
-        return create_project(event, user_sub, user_role)
+        return create_project(event, caller)
     if route == "GET /projects/bin":
-        return list_bin(user_sub, user_role)
+        return list_bin(caller)
     if route == "GET /projects/{projectId}":
-        return get_project(path_params.get("projectId"), user_sub, user_role)
+        return get_project(project_id, caller)
+    if route == "PATCH /projects/{projectId}":
+        return rename_project(event, project_id, caller)
     if route == "DELETE /projects/{projectId}":
-        return soft_delete_project(path_params.get("projectId"), user_sub, user_role)
+        return soft_delete_project(project_id, caller)
     if route == "POST /projects/{projectId}/restore":
-        return restore_project(path_params.get("projectId"), user_sub, user_role)
+        return restore_project(project_id, caller)
     if route == "DELETE /projects/{projectId}/permanent":
-        return permanent_delete_project(path_params.get("projectId"), user_sub, user_role)
-    if route == "GET /projects/{projectId}/members":
-        return list_members(path_params.get("projectId"), user_sub, user_role)
-    if route == "DELETE /projects/{projectId}/members/{memberId}":
-        return remove_member(path_params.get("projectId"), path_params.get("memberId"), user_sub, user_role)
+        return permanent_delete_project(project_id, caller)
     if route == "GET /projects/{projectId}/reports":
-        return list_reports(path_params.get("projectId"), user_sub, user_role)
+        return list_reports(project_id, caller)
     if route == "POST /projects/{projectId}/reports":
-        return save_report(event, path_params.get("projectId"), user_sub, user_role)
+        return save_report(event, project_id, caller)
     if route == "DELETE /projects/{projectId}/reports/{reportId}":
-        return delete_report(path_params.get("projectId"), path_params.get("reportId"), user_sub, user_role)
+        return delete_report(project_id, params.get("reportId"), caller)
 
-    return response(404, {"error": "Not found"})
+    return not_found()
 
 
-def list_projects(user_sub: str, user_role: str) -> dict:
-    if user_role == "admin":
-        admin_result = table.query(
-            IndexName="GSI1",
-            KeyConditionExpression=Key("GSI1PK").eq(f"ADMIN#{user_sub}"),
-        )
-        projects = [
-            item for item in admin_result.get("Items", [])
-            if item.get("SK") == "METADATA" and not item.get("deletedAt")
-        ]
-    else:
-        result = table.query(
-            IndexName="GSI1",
-            KeyConditionExpression=Key("GSI1PK").eq(f"USER#{user_sub}") & Key("GSI1SK").begins_with("PROJECT#"),
-        )
-        project_ids = [item["GSI1SK"].replace("PROJECT#", "") for item in result.get("Items", [])]
-        projects = []
-        if project_ids:
-            for i in range(0, len(project_ids), 100):
-                chunk = project_ids[i:i + 100]
-                batch_resp = dynamodb.batch_get_item(RequestItems={TABLE_NAME: {"Keys": [
-                    {"PK": f"PROJECT#{pid}", "SK": "METADATA"} for pid in chunk
-                ]}})
-                for item in batch_resp.get("Responses", {}).get(TABLE_NAME, []):
-                    if not item.get("deletedAt"):
-                        projects.append(item)
+# ── Listing (AP-2 / AP-3) ────────────────────────────────────────────────────
 
-    def _fetch_count(proj):
-        pid = proj.get("projectId", "")
-        count_result = table.query(
-            KeyConditionExpression=Key("PK").eq(f"PROJECT#{pid}") & Key("SK").begins_with("MEMBER#"),
-            Select="COUNT",
-        )
-        proj["testerCount"] = count_result.get("Count", 0)
+def _org_projects(caller) -> list:
+    return query_all(
+        IndexName=GSI1,
+        KeyConditionExpression=Key("GSI1PK").eq(org_pk(caller.org_id))
+        & Key("GSI1SK").begins_with("PROJECT#"),
+    )
 
-    if projects:
-        with ThreadPoolExecutor(max_workers=min(len(projects), 10)) as executor:
-            list(executor.map(_fetch_count, projects))
 
+def list_projects(caller) -> dict:
+    """One GSI query for the whole dashboard.
+
+    Member count is identical for every project under the org model, so the old
+    per-project COUNT query on a ThreadPoolExecutor collapses into one read.
+    """
+    projects = [p for p in _org_projects(caller) if not p.get("deletedAt")]
+    count = len(list_members(caller.org_id))
+    for project in projects:
+        project["memberCount"] = count
+    projects.sort(key=lambda p: p.get("createdAt", ""), reverse=True)
     return response(200, {"projects": projects})
 
 
-def create_project(event: dict, user_sub: str, user_role: str) -> dict:
-    if user_role != "admin":
-        return response(403, {"error": "Forbidden"})
-
-    body = json.loads(event.get("body") or "{}")
-    title = body.get("title", "").strip()
-    if not title:
-        return response(400, {"error": "title is required"})
-
-    project_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-
-    table.put_item(
-        Item={
-            "PK": f"PROJECT#{project_id}",
-            "SK": "METADATA",
-            "projectId": project_id,
-            "title": title,
-            "createdBy": user_sub,
-            "createdAt": now,
-            "GSI1PK": f"ADMIN#{user_sub}",
-            "GSI1SK": f"PROJECT#{project_id}",
-        }
-    )
-
-    tester_count = _auto_add_existing_testers(project_id, user_sub, now)
-
-    return response(201, {"projectId": project_id, "title": title, "createdAt": now, "testerCount": tester_count})
-
-
-def _auto_add_existing_testers(new_project_id: str, admin_sub: str, now: str) -> int:
-    existing_projects = table.query(
-        IndexName="GSI1",
-        KeyConditionExpression=Key("GSI1PK").eq(f"ADMIN#{admin_sub}"),
-    ).get("Items", [])
-
-    seen = set()
-    count = 0
-    for proj in existing_projects:
-        proj_id = proj.get("projectId")
-        if not proj_id or proj_id == new_project_id:
-            continue
-        members = table.query(
-            KeyConditionExpression=Key("PK").eq(f"PROJECT#{proj_id}") & Key("SK").begins_with("MEMBER#"),
-        ).get("Items", [])
-        for m in members:
-            tester_sub = m["SK"].replace("MEMBER#", "")
-            if tester_sub in seen:
-                continue
-            seen.add(tester_sub)
-            try:
-                table.put_item(
-                    Item={
-                        "PK": f"PROJECT#{new_project_id}",
-                        "SK": f"MEMBER#{tester_sub}",
-                        "email": m.get("email", ""),
-                        "role": "tester",
-                        "joinedAt": now,
-                        "GSI1PK": f"USER#{tester_sub}",
-                        "GSI1SK": f"PROJECT#{new_project_id}",
-                    },
-                    ConditionExpression="attribute_not_exists(SK)",
-                )
-                count += 1
-            except Exception:
-                pass
-    return count
-
-
-def soft_delete_project(project_id: str, user_sub: str, user_role: str) -> dict:
-    if user_role != "admin":
-        return response(403, {"error": "Forbidden"})
-
-    proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
-    if not proj:
-        return response(404, {"error": "Project not found"})
-
-    if proj.get("GSI1PK") != f"ADMIN#{user_sub}":
-        return response(403, {"error": "Forbidden"})
-
-    now = datetime.now(timezone.utc).isoformat()
-    table.update_item(
-        Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"},
-        UpdateExpression="SET deletedAt = :d",
-        ExpressionAttributeValues={":d": now},
-    )
-    return response(200, {"message": "Project moved to bin"})
-
-
-def list_bin(user_sub: str, user_role: str) -> dict:
-    if user_role == "admin":
-        result = table.query(
-            IndexName="GSI1",
-            KeyConditionExpression=Key("GSI1PK").eq(f"ADMIN#{user_sub}"),
-        )
-        projects = [
-            item for item in result.get("Items", [])
-            if item.get("SK") == "METADATA" and item.get("deletedAt")
-        ]
-    else:
-        result = table.query(
-            IndexName="GSI1",
-            KeyConditionExpression=Key("GSI1PK").eq(f"USER#{user_sub}") & Key("GSI1SK").begins_with("PROJECT#"),
-        )
-        project_ids = [item["GSI1SK"].replace("PROJECT#", "") for item in result.get("Items", [])]
-        projects = []
-        for pid in project_ids:
-            item = table.get_item(Key={"PK": f"PROJECT#{pid}", "SK": "METADATA"}).get("Item")
-            if item and item.get("deletedAt"):
-                projects.append(item)
-
+def list_bin(caller) -> dict:
+    """Visible to every role; only Developers and the Owner get controls (A3)."""
+    projects = [p for p in _org_projects(caller) if p.get("deletedAt")]
+    projects.sort(key=lambda p: p.get("deletedAt", ""), reverse=True)
     return response(200, {"projects": projects})
 
 
-def restore_project(project_id: str, user_sub: str, user_role: str) -> dict:
-    proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
-    if not proj:
-        return response(404, {"error": "Project not found"})
+def get_project(project_id: str, caller) -> dict:
+    return response(200, require_project(caller, project_id))
 
-    if user_role == "admin":
-        if proj.get("GSI1PK") != f"ADMIN#{user_sub}":
-            return response(403, {"error": "Forbidden"})
-    else:
-        membership = table.get_item(
-            Key={"PK": f"PROJECT#{project_id}", "SK": f"MEMBER#{user_sub}"}
-        ).get("Item")
-        if not membership:
-            return response(403, {"error": "Forbidden"})
+
+# ── Mutations ────────────────────────────────────────────────────────────────
+
+def create_project(event: dict, caller) -> dict:
+    require_developer(caller)
+    body = json_body(event)
+    (title,) = required(body, "title")
+    if len(title) > MAX_TITLE:
+        raise ApiError(400, f"Title must be {MAX_TITLE} characters or fewer.", "title_too_long")
+
+    project_id = new_id()
+    now = now_iso()
+    item = {
+        "PK": project_pk(project_id),
+        "SK": METADATA,
+        "projectId": project_id,
+        "orgId": caller.org_id,
+        "title": title,
+        "createdBy": caller.sub,
+        "createdAt": now,
+        "GSI1PK": org_pk(caller.org_id),
+        "GSI1SK": project_sk(project_id),
+    }
+    table.put_item(Item=item)
+
+    # No tester back-fill: org membership already grants access to this project.
+    item["memberCount"] = len(list_members(caller.org_id))
+    return response(201, item)
+
+
+def rename_project(event: dict, project_id: str, caller) -> dict:
+    require_developer(caller)
+    require_project(caller, project_id)
+    body = json_body(event)
+    (title,) = required(body, "title")
+    if len(title) > MAX_TITLE:
+        raise ApiError(400, f"Title must be {MAX_TITLE} characters or fewer.", "title_too_long")
 
     table.update_item(
-        Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"},
+        Key={"PK": project_pk(project_id), "SK": METADATA},
+        UpdateExpression="SET title = :t",
+        ExpressionAttributeValues={":t": title},
+    )
+    return response(200, {"projectId": project_id, "title": title})
+
+
+def soft_delete_project(project_id: str, caller) -> dict:
+    require_developer(caller)
+    require_project(caller, project_id)
+    now = now_iso()
+    table.update_item(
+        Key={"PK": project_pk(project_id), "SK": METADATA},
+        UpdateExpression="SET deletedAt = :now",
+        ExpressionAttributeValues={":now": now},
+    )
+    return response(200, {"projectId": project_id, "deletedAt": now})
+
+
+def restore_project(project_id: str, caller) -> dict:
+    require_developer(caller)
+    require_project(caller, project_id, allow_deleted=True)
+    table.update_item(
+        Key={"PK": project_pk(project_id), "SK": METADATA},
         UpdateExpression="REMOVE deletedAt",
     )
-    return response(200, {"message": "Project restored"})
+    return response(200, {"projectId": project_id})
 
 
-def permanent_delete_project(project_id: str, user_sub: str, user_role: str) -> dict:
-    if user_role != "admin":
-        return response(403, {"error": "Forbidden"})
+def permanent_delete_project(project_id: str, caller) -> dict:
+    """Purge the project partition and every S3 object it references."""
+    require_developer(caller)
+    require_project(caller, project_id, allow_deleted=True)
 
-    proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
-    if not proj:
-        return response(404, {"error": "Project not found"})
+    items = query_all(KeyConditionExpression=Key("PK").eq(project_pk(project_id)))
 
-    if proj.get("GSI1PK") != f"ADMIN#{user_sub}":
-        return response(403, {"error": "Forbidden"})
+    keys = []
+    for item in items:
+        sk = item.get("SK", "")
+        if sk.startswith(BUG_PREFIX):
+            for field in ("screenshots", "videos", "documents"):
+                keys.extend(item.get(field) or [])
+        elif sk.startswith(REPORT_PREFIX) and item.get("s3Key"):
+            keys.append(item["s3Key"])
 
-    # Process one DynamoDB page at a time to avoid loading all items into memory
-    last_key = None
-    while True:
-        kwargs = {"KeyConditionExpression": Key("PK").eq(f"PROJECT#{project_id}")}
-        if last_key:
-            kwargs["ExclusiveStartKey"] = last_key
-        result = table.query(**kwargs)
-        page_items = result.get("Items", [])
+    _delete_s3_objects(keys)
+    deleted = delete_all(items)
 
-        # Delete S3 objects for this page
-        if BUCKET_NAME:
-            for item in page_items:
-                sk = item.get("SK", "")
-                if sk.startswith("BUG#"):
-                    for key in item.get("screenshots", []) + item.get("documents", []) + item.get("videos", []):
-                        if key:
-                            try:
-                                s3.delete_object(Bucket=BUCKET_NAME, Key=key)
-                            except Exception:
-                                pass
-                elif sk.startswith("REPORT#"):
-                    s3_key = item.get("s3Key")
-                    if s3_key:
-                        try:
-                            s3.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
-                        except Exception:
-                            pass
-
-        # Batch delete DynamoDB items for this page
-        with table.batch_writer() as batch:
-            for item in page_items:
-                batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
-
-        last_key = result.get("LastEvaluatedKey")
-        if not last_key:
-            break
-
-    return response(200, {"message": "Project permanently deleted"})
+    return response(200, {"projectId": project_id, "itemsDeleted": deleted})
 
 
-def get_project(project_id: str, user_sub: str, user_role: str) -> dict:
-    item = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
-    if not item:
-        return response(404, {"error": "Project not found"})
-
-    if user_role == "tester":
-        membership = table.get_item(
-            Key={"PK": f"PROJECT#{project_id}", "SK": f"MEMBER#{user_sub}"}
-        ).get("Item")
-        if not membership:
-            return response(403, {"error": "Forbidden"})
-
-    members = table.query(
-        KeyConditionExpression=Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("MEMBER#"),
-        Select="COUNT",
-    )
-    item["testerCount"] = members.get("Count", 0)
-
-    admin_sub = item.get("GSI1PK", "").replace("ADMIN#", "")
-    if admin_sub:
-        admin_profile = table.get_item(Key={"PK": f"USER#{admin_sub}", "SK": "PROFILE"}).get("Item")
-        if admin_profile:
-            item["adminName"] = admin_profile.get("name", "")
-
-    return response(200, item)
-
-
-def list_members(project_id: str, user_sub: str, user_role: str) -> dict:
-    if user_role != "admin":
-        return response(403, {"error": "Forbidden"})
-
-    proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
-    if not proj:
-        return response(404, {"error": "Project not found"})
-
-    result = table.query(
-        KeyConditionExpression=Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("MEMBER#"),
-    )
-    raw_members = result.get("Items", [])
-
-    # Batch-fetch user profiles to get real display names
-    if raw_members:
-        keys = [{"PK": f"USER#{item['SK'].replace('MEMBER#', '')}", "SK": "PROFILE"} for item in raw_members]
-        batch_result = dynamodb.batch_get_item(RequestItems={TABLE_NAME: {"Keys": keys}})
-        profiles = {
-            p["PK"].replace("USER#", ""): p
-            for p in batch_result.get("Responses", {}).get(TABLE_NAME, [])
-        }
-    else:
-        profiles = {}
-
-    members = [
-        {
-            "memberId": item["SK"].replace("MEMBER#", ""),
-            "email": item.get("email", ""),
-            "name": profiles.get(item["SK"].replace("MEMBER#", ""), {}).get("name") or item.get("email", "").split("@")[0],
-            "joinedAt": item.get("joinedAt", ""),
-        }
-        for item in raw_members
-    ]
-
-    return response(200, {"members": members})
-
-
-def remove_member(project_id: str, member_id: str, user_sub: str, user_role: str) -> dict:
-    if user_role != "admin":
-        return response(403, {"error": "Forbidden"})
-
-    proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
-    if not proj:
-        return response(404, {"error": "Project not found"})
-
-    # Get tester email from membership record (needed for Cognito deletion)
-    membership = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"MEMBER#{member_id}"}).get("Item")
-    if not membership:
-        return response(404, {"error": "Member not found"})
-    tester_email = membership.get("email", "")
-
-    # 1. Find ALL projects this tester belongs to via GSI1
-    gsi_result = table.query(
-        IndexName="GSI1",
-        KeyConditionExpression=Key("GSI1PK").eq(f"USER#{member_id}") & Key("GSI1SK").begins_with("PROJECT#"),
-    )
-    all_project_ids = [item["GSI1SK"].replace("PROJECT#", "") for item in gsi_result.get("Items", [])]
-
-    # 2. Collect every DynamoDB key to remove: memberships (both directions),
-    #    profile, and all notifications.
-    delete_keys = []
-    for pid in all_project_ids:
-        delete_keys.append((f"PROJECT#{pid}", f"MEMBER#{member_id}"))
-        delete_keys.append((f"USER#{member_id}", f"PROJECT#{pid}"))
-    delete_keys.append((f"USER#{member_id}", "PROFILE"))
-
-    notif_result = table.query(
-        KeyConditionExpression=Key("PK").eq(f"USER#{member_id}") & Key("SK").begins_with("NOTIF#"),
-        ProjectionExpression="PK, SK",
-    )
-    for item in notif_result.get("Items", []):
-        delete_keys.append((item["PK"], item["SK"]))
-
-    # 3. Delete atomically. transact_write_items is all-or-nothing, so a failure
-    #    leaves every record intact and the deletion is safely retryable.
-    #    Chunked at 100 (the transaction item limit).
-    client = dynamodb.meta.client
-    for i in range(0, len(delete_keys), 100):
-        chunk = delete_keys[i:i + 100]
-        client.transact_write_items(
-            TransactItems=[
-                {"Delete": {"TableName": TABLE_NAME, "Key": {"PK": {"S": pk}, "SK": {"S": sk}}}}
-                for pk, sk in chunk
-            ]
-        )
-
-    # 4. Delete Cognito user LAST — irreversible, so it only runs once all
-    #    DynamoDB cleanup has succeeded. Frees the email for re-invite/registration.
-    if tester_email and USER_POOL_ID:
+def _delete_s3_objects(keys: list) -> None:
+    if not keys or not BUCKET_NAME:
+        return
+    unique = [{"Key": k} for k in dict.fromkeys(keys) if k]
+    for i in range(0, len(unique), 1000):  # DeleteObjects caps at 1000 per call
         try:
-            cognito.admin_delete_user(UserPoolId=USER_POOL_ID, Username=tester_email)
-        except cognito.exceptions.UserNotFoundException:
-            pass  # Already gone
-        except Exception:
-            pass  # Don't fail the request if Cognito cleanup fails
-
-    return response(200, {"message": "Tester deleted successfully"})
+            s3.delete_objects(Bucket=BUCKET_NAME, Delete={"Objects": unique[i:i + 1000]})
+        except Exception as err:  # noqa: BLE001
+            print(f"S3 delete failed: {err}")
 
 
-def _check_project_access(project_id: str, user_sub: str, user_role: str) -> bool:
-    if user_role == "admin":
-        return table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item") is not None
-    return table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"MEMBER#{user_sub}"}).get("Item") is not None
+# ── Reports ──────────────────────────────────────────────────────────────────
 
-
-def list_reports(project_id: str, user_sub: str, user_role: str) -> dict:
-    if not _check_project_access(project_id, user_sub, user_role):
-        return response(403, {"error": "Forbidden"})
-
-    result = table.query(
-        KeyConditionExpression=Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("REPORT#"),
+def list_reports(project_id: str, caller) -> dict:
+    """Readable by every role, including Testers (A1)."""
+    require_project(caller, project_id)
+    reports = query_all(
+        KeyConditionExpression=Key("PK").eq(project_pk(project_id))
+        & Key("SK").begins_with(REPORT_PREFIX),
     )
-    reports = [
-        {k: v for k, v in item.items() if k not in ("PK", "SK")}
-        for item in result.get("Items", [])
-    ]
-    reports.sort(key=lambda r: r.get("uploadedAt", ""))
+    reports.sort(key=lambda r: r.get("uploadedAt", ""), reverse=True)
     return response(200, {"reports": reports})
 
 
-def save_report(event: dict, project_id: str, user_sub: str, user_role: str) -> dict:
-    if not _check_project_access(project_id, user_sub, user_role):
-        return response(403, {"error": "Forbidden"})
+def save_report(event: dict, project_id: str, caller) -> dict:
+    require_developer(caller)
+    require_project(caller, project_id)
+    body = json_body(event)
+    (s3_key, filename, content_type) = required(body, "s3Key", "filename", "contentType")
 
     existing = table.query(
-        KeyConditionExpression=Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("REPORT#"),
+        KeyConditionExpression=Key("PK").eq(project_pk(project_id))
+        & Key("SK").begins_with(REPORT_PREFIX),
         Select="COUNT",
-    )
-    if existing.get("Count", 0) >= 5:
-        return response(400, {"error": "Maximum 5 report files per project"})
+    ).get("Count", 0)
+    if existing >= MAX_REPORTS:
+        raise ApiError(400, f"A project can hold at most {MAX_REPORTS} reports.", "report_limit")
 
-    body = json.loads(event.get("body") or "{}")
-    s3_key = body.get("s3Key", "").strip()
-    filename = body.get("filename", "").strip()
-    content_type = body.get("contentType", "").strip()
-
-    if not s3_key or not filename:
-        return response(400, {"error": "s3Key and filename are required"})
-
-    report_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-
-    table.put_item(Item={
-        "PK": f"PROJECT#{project_id}",
-        "SK": f"REPORT#{report_id}",
+    report_id = new_id()
+    item = {
+        "PK": project_pk(project_id),
+        "SK": report_sk(report_id),
         "reportId": report_id,
         "projectId": project_id,
         "s3Key": s3_key,
         "filename": filename,
         "contentType": content_type,
-        "uploadedBy": user_sub,
-        "uploadedAt": now,
-    })
-
-    return response(201, {
-        "reportId": report_id,
-        "projectId": project_id,
-        "s3Key": s3_key,
-        "filename": filename,
-        "contentType": content_type,
-        "uploadedBy": user_sub,
-        "uploadedAt": now,
-    })
+        "uploadedBy": caller.sub,
+        "uploadedAt": now_iso(),
+    }
+    table.put_item(Item=item)
+    return response(201, item)
 
 
-def delete_report(project_id: str, report_id: str, user_sub: str, user_role: str) -> dict:
-    if not _check_project_access(project_id, user_sub, user_role):
-        return response(403, {"error": "Forbidden"})
+def delete_report(project_id: str, report_id: str, caller) -> dict:
+    require_developer(caller)
+    require_project(caller, project_id)
+    if not report_id:
+        raise ApiError(400, "'reportId' is required.", "missing_field")
 
-    report = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"REPORT#{report_id}"}).get("Item")
+    report = get_item(project_pk(project_id), report_sk(report_id))
     if not report:
-        return response(404, {"error": "Report not found"})
+        raise ApiError(404, "Report not found.", "not_found")
 
-    if BUCKET_NAME and report.get("s3Key"):
-        try:
-            s3.delete_object(Bucket=BUCKET_NAME, Key=report["s3Key"])
-        except Exception:
-            pass
-
-    table.delete_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"REPORT#{report_id}"})
-    return response(200, {"message": "Report deleted"})
+    _delete_s3_objects([report.get("s3Key")])
+    table.delete_item(Key={"PK": project_pk(project_id), "SK": report_sk(report_id)})
+    return response(200, {"reportId": report_id})

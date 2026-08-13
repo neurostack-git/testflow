@@ -21,3 +21,9 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Lambda deploy artifacts — CDK zips from source, these are never read
+*.zip
+
+# Contains real collaborator email addresses — must never reach a public repo
+scripts/wiped-members-*.md

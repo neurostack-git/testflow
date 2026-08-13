@@ -1,96 +1,93 @@
-import json
-import os
-import boto3
+"""Chat history, chat roster and in-app notifications (LLD §9.4, D15).
+
+Chat stays one room per project; the access check is now "is this project in my
+org" rather than "am I a member of this project". The roster is simply the org
+member list, so @-mention targets are everyone in the workspace.
+"""
+
 from boto3.dynamodb.conditions import Key
 
-dynamodb = boto3.resource("dynamodb")
-TABLE_NAME = os.environ["TABLE_NAME"]
-table = dynamodb.Table(TABLE_NAME)
+from tfcommon.auth import get_caller, require_developer, require_project
+from tfcommon.db import (
+    MSG_PREFIX,
+    NOTIF_PREFIX,
+    PROFILE,
+    get_item,
+    project_pk,
+    table,
+    user_pk,
+)
+from tfcommon.http import ApiError, api_handler, not_found, response
+from tfcommon.org import list_members
+
+HISTORY_PAGE = 50
+NOTIF_PAGE = 30
 
 
-def resp(status: int, body) -> dict:
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-        "body": json.dumps(body, default=str),
-    }
-
-
+@api_handler
 def lambda_handler(event: dict, context) -> dict:
     route = event.get("routeKey", "")
-    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
-    user_sub = claims.get("sub")
-    user_role = claims.get("custom:role", "tester")
-    path_params = event.get("pathParameters") or {}
-    project_id = path_params.get("projectId")
-    notif_id = path_params.get("notifId")
+    params = event.get("pathParameters") or {}
+    project_id = params.get("projectId")
+    caller = get_caller(event)
 
     if route == "GET /projects/{projectId}/chat/history":
-        return get_history(event, project_id, user_sub, user_role)
+        return get_history(event, project_id, caller)
     if route == "DELETE /projects/{projectId}/chat/history":
-        return clear_history(project_id, user_sub, user_role)
+        return clear_history(project_id, caller)
     if route == "GET /projects/{projectId}/chat/members":
-        return get_chat_members(project_id, user_sub, user_role)
+        return get_chat_members(project_id, caller)
     if route == "GET /notifications":
-        return get_notifications(user_sub)
+        return get_notifications(caller)
     if route == "PATCH /notifications/{notifId}/read":
-        return mark_read(notif_id, user_sub)
+        return mark_read(params.get("notifId"), caller)
     if route == "PATCH /notifications/read-all":
-        return mark_all_read(user_sub)
+        return mark_all_read(caller)
     if route == "DELETE /notifications":
-        return clear_all_notifications(user_sub)
+        return clear_all_notifications(caller)
 
-    return resp(404, {"error": "Not found"})
-
-
-def _check_access(project_id: str, user_sub: str, user_role: str) -> bool:
-    if user_role == "admin":
-        return table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item") is not None
-    return table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": f"MEMBER#{user_sub}"}).get("Item") is not None
+    return not_found()
 
 
-# ── Chat history ──────────────────────────────────────────────────────────────
+# ── History ──────────────────────────────────────────────────────────────────
 
-def get_history(event: dict, project_id: str, user_sub: str, user_role: str) -> dict:
-    if not _check_access(project_id, user_sub, user_role):
-        return resp(403, {"error": "Forbidden"})
-
-    query_params = event.get("queryStringParameters") or {}
-    cursor = query_params.get("cursor")
+def get_history(event: dict, project_id: str, caller) -> dict:
+    """Readable by every role, including Testers (A2)."""
+    require_project(caller, project_id)
+    cursor = (event.get("queryStringParameters") or {}).get("cursor")
 
     kwargs = {
-        "KeyConditionExpression": Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("MSG#"),
-        "Limit": 50,
+        "KeyConditionExpression": Key("PK").eq(project_pk(project_id))
+        & Key("SK").begins_with(MSG_PREFIX),
+        "Limit": HISTORY_PAGE,
         "ScanIndexForward": False,
     }
     if cursor:
-        kwargs["ExclusiveStartKey"] = {"PK": f"PROJECT#{project_id}", "SK": cursor}
+        kwargs["ExclusiveStartKey"] = {"PK": project_pk(project_id), "SK": cursor}
 
     result = table.query(**kwargs)
     messages = result.get("Items", [])
-    messages.reverse()  # chronological order for display
+    messages.reverse()  # chronological for display
 
-    next_cursor = None
     last_key = result.get("LastEvaluatedKey")
-    if last_key:
-        next_cursor = last_key.get("SK")
-
     clean = [{k: v for k, v in m.items() if k not in ("PK", "SK")} for m in messages]
-    return resp(200, {"messages": clean, "nextCursor": next_cursor})
+    return response(200, {
+        "messages": clean,
+        "nextCursor": last_key.get("SK") if last_key else None,
+    })
 
 
-def clear_history(project_id: str, user_sub: str, user_role: str) -> dict:
-    if user_role != "admin":
-        return resp(403, {"error": "Forbidden"})
-    if not _check_access(project_id, user_sub, user_role):
-        return resp(403, {"error": "Forbidden"})
+def clear_history(project_id: str, caller) -> dict:
+    """Destructive and org-wide, so Developer/Owner only (A4)."""
+    require_developer(caller)
+    require_project(caller, project_id)
 
-    # Paginate and batch-delete all MSG# items for this project
-    last_key = None
     deleted = 0
+    last_key = None
     while True:
         kwargs = {
-            "KeyConditionExpression": Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("MSG#"),
+            "KeyConditionExpression": Key("PK").eq(project_pk(project_id))
+            & Key("SK").begins_with(MSG_PREFIX),
             "ProjectionExpression": "PK, SK",
         }
         if last_key:
@@ -106,91 +103,86 @@ def clear_history(project_id: str, user_sub: str, user_role: str) -> dict:
         if not last_key:
             break
 
-    return resp(200, {"deleted": deleted})
+    return response(200, {"deleted": deleted})
 
 
-# ── Chat members (all participants: admin + testers) ──────────────────────────
+# ── Roster ───────────────────────────────────────────────────────────────────
 
-def get_chat_members(project_id: str, user_sub: str, user_role: str) -> dict:
-    if not _check_access(project_id, user_sub, user_role):
-        return resp(403, {"error": "Forbidden"})
-
-    proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
-    if not proj:
-        return resp(404, {"error": "Project not found"})
+def get_chat_members(project_id: str, caller) -> dict:
+    """Everyone in the org — there is no per-project roster any more (D11)."""
+    require_project(caller, project_id)
 
     members = []
-
-    # Admin
-    admin_sub = proj.get("GSI1PK", "").replace("ADMIN#", "")
-    if admin_sub:
-        admin_profile = table.get_item(Key={"PK": f"USER#{admin_sub}", "SK": "PROFILE"}).get("Item", {})
+    for member in list_members(caller.org_id):
+        sub = member.get("sub", "")
+        profile = get_item(user_pk(sub), PROFILE) or {}
         members.append({
-            "sub": admin_sub,
-            "name": admin_profile.get("name") or admin_profile.get("email", "").split("@")[0] or "Admin",
-            "role": "admin",
-            "avatarKey": admin_profile.get("avatarKey", ""),
+            "sub": sub,
+            "name": member.get("name") or profile.get("name") or member.get("email", "").split("@")[0],
+            "role": member.get("role", "tester"),
+            "avatarKey": profile.get("avatarKey", ""),
         })
-
-    # Testers
-    tester_result = table.query(
-        KeyConditionExpression=Key("PK").eq(f"PROJECT#{project_id}") & Key("SK").begins_with("MEMBER#"),
-    )
-    tester_items = tester_result.get("Items", [])
-    if tester_items:
-        keys = [{"PK": f"USER#{item['SK'].replace('MEMBER#', '')}", "SK": "PROFILE"} for item in tester_items]
-        batch_resp = dynamodb.batch_get_item(RequestItems={TABLE_NAME: {"Keys": keys}})
-        profiles = {
-            p["PK"].replace("USER#", ""): p
-            for p in batch_resp.get("Responses", {}).get(TABLE_NAME, [])
-        }
-        for item in tester_items:
-            sub = item["SK"].replace("MEMBER#", "")
-            profile = profiles.get(sub, {})
-            members.append({
-                "sub": sub,
-                "name": profile.get("name") or item.get("email", "").split("@")[0] or sub[:8],
-                "role": "tester",
-                "avatarKey": profile.get("avatarKey", ""),
-            })
-
-    return resp(200, {"members": members})
+    return response(200, {"members": members})
 
 
-# ── Notifications ─────────────────────────────────────────────────────────────
+# ── Notifications ────────────────────────────────────────────────────────────
 
-def get_notifications(user_sub: str) -> dict:
+def get_notifications(caller) -> dict:
     result = table.query(
-        KeyConditionExpression=Key("PK").eq(f"USER#{user_sub}") & Key("SK").begins_with("NOTIF#"),
+        KeyConditionExpression=Key("PK").eq(user_pk(caller.sub))
+        & Key("SK").begins_with(NOTIF_PREFIX),
         ScanIndexForward=False,
-        Limit=30,
+        Limit=NOTIF_PAGE,
     )
-    notifications = result.get("Items", [])
-    clean = [{k: v for k, v in n.items() if k not in ("PK",)} for n in notifications]
-    unread_count = sum(1 for n in clean if not n.get("read", False))
-    return resp(200, {"notifications": clean, "unreadCount": unread_count})
+    clean = [{k: v for k, v in n.items() if k != "PK"} for n in result.get("Items", [])]
+    return response(200, {
+        "notifications": clean,
+        "unreadCount": sum(1 for n in clean if not n.get("read")),
+    })
 
 
-def mark_read(notif_id: str, user_sub: str) -> dict:
+def mark_read(notif_id: str, caller) -> dict:
+    if not notif_id:
+        raise ApiError(400, "'notifId' is required.", "missing_field")
     result = table.query(
-        KeyConditionExpression=Key("PK").eq(f"USER#{user_sub}") & Key("SK").begins_with("NOTIF#"),
+        KeyConditionExpression=Key("PK").eq(user_pk(caller.sub))
+        & Key("SK").begins_with(NOTIF_PREFIX),
     )
-    notif = next((item for item in result.get("Items", []) if item.get("notifId") == notif_id), None)
+    notif = next((n for n in result.get("Items", []) if n.get("notifId") == notif_id), None)
     if not notif:
-        return resp(404, {"error": "Notification not found"})
+        raise ApiError(404, "Notification not found.", "not_found")
 
     table.update_item(
-        Key={"PK": f"USER#{user_sub}", "SK": notif["SK"]},
+        Key={"PK": user_pk(caller.sub), "SK": notif["SK"]},
         UpdateExpression="SET #r = :r",
         ExpressionAttributeNames={"#r": "read"},
         ExpressionAttributeValues={":r": True},
     )
-    return resp(200, {"message": "Marked as read"})
+    return response(200, {"notifId": notif_id})
 
 
-def clear_all_notifications(user_sub: str) -> dict:
+def mark_all_read(caller) -> dict:
     result = table.query(
-        KeyConditionExpression=Key("PK").eq(f"USER#{user_sub}") & Key("SK").begins_with("NOTIF#"),
+        KeyConditionExpression=Key("PK").eq(user_pk(caller.sub))
+        & Key("SK").begins_with(NOTIF_PREFIX),
+    )
+    updated = 0
+    for item in result.get("Items", []):
+        if not item.get("read"):
+            table.update_item(
+                Key={"PK": user_pk(caller.sub), "SK": item["SK"]},
+                UpdateExpression="SET #r = :r",
+                ExpressionAttributeNames={"#r": "read"},
+                ExpressionAttributeValues={":r": True},
+            )
+            updated += 1
+    return response(200, {"updated": updated})
+
+
+def clear_all_notifications(caller) -> dict:
+    result = table.query(
+        KeyConditionExpression=Key("PK").eq(user_pk(caller.sub))
+        & Key("SK").begins_with(NOTIF_PREFIX),
         ProjectionExpression="PK, SK",
     )
     items = result.get("Items", [])
@@ -198,19 +190,4 @@ def clear_all_notifications(user_sub: str) -> dict:
         with table.batch_writer() as batch:
             for item in items:
                 batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
-    return resp(200, {"deleted": len(items)})
-
-
-def mark_all_read(user_sub: str) -> dict:
-    result = table.query(
-        KeyConditionExpression=Key("PK").eq(f"USER#{user_sub}") & Key("SK").begins_with("NOTIF#"),
-    )
-    for item in result.get("Items", []):
-        if not item.get("read", False):
-            table.update_item(
-                Key={"PK": f"USER#{user_sub}", "SK": item["SK"]},
-                UpdateExpression="SET #r = :r",
-                ExpressionAttributeNames={"#r": "read"},
-                ExpressionAttributeValues={":r": True},
-            )
-    return resp(200, {"message": "All marked as read"})
+    return response(200, {"deleted": len(items)})

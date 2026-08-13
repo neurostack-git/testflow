@@ -10,14 +10,15 @@ import { Plus, FolderOpen, Bug, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { projectsApi, type Project } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
+import { canCreateProject } from "@/lib/permissions";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { Spinner } from "@/components/ui/spinner";
 import { ErrorAlert } from "@/components/ui/error-alert";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function DashboardPage() {
-  const { user } = useAuth();
-  const role = user?.role ?? "tester";
+  const { user, role } = useAuth();
+  const canManage = canCreateProject(role);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,7 +91,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           <NotificationBell />
-          {role === "admin" && (
+          {canManage && (
             <Button onClick={() => setOpen(true)} className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-sm shadow-primary/20 gap-2">
               <Plus className="w-4 h-4" />
               New Project
@@ -107,7 +108,7 @@ export default function DashboardPage() {
             <FolderOpen className="w-7 h-7 text-primary" />
           </div>
           <h3 className="text-lg font-semibold text-foreground">No projects yet</h3>
-          {role === "admin" ? (
+          {canManage ? (
             <>
               <p className="text-muted-foreground mt-1 mb-6">Create your first project to start tracking bugs.</p>
               <Button onClick={() => setOpen(true)} className="bg-primary hover:bg-primary/90 gap-2">
@@ -116,7 +117,7 @@ export default function DashboardPage() {
               </Button>
             </>
           ) : (
-            <p className="text-muted-foreground mt-1">You haven&apos;t been added to any projects yet.</p>
+            <p className="text-muted-foreground mt-1">No projects have been created in this workspace yet.</p>
           )}
         </div>
       ) : (
@@ -135,7 +136,7 @@ export default function DashboardPage() {
                   </h3>
                   <div className="flex items-center justify-between mt-1">
                     <p className="text-sm text-muted-foreground">
-                      {project.testerCount ?? 0} tester{(project.testerCount ?? 0) !== 1 ? "s" : ""}
+                      {project.memberCount ?? 0} member{(project.memberCount ?? 0) !== 1 ? "s" : ""}
                     </p>
                     <span className="text-xs text-muted-foreground">
                       {new Date(project.createdAt).toLocaleDateString()}
@@ -143,7 +144,7 @@ export default function DashboardPage() {
                   </div>
                 </Card>
               </Link>
-              {role === "admin" && (
+              {canManage && (
                 <button
                   onClick={() => setBinConfirm({ open: true, projectId: project.projectId, title: project.title })}
                   className="absolute top-3 right-3 z-10 p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"

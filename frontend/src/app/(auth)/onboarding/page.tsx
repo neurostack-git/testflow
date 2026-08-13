@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Check, X } from "lucide-react";
+import { Check, X, Building2 } from "lucide-react";
 import { completeNewPassword, mapAuthError } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
@@ -15,15 +15,34 @@ import { ErrorAlert } from "@/components/ui/error-alert";
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { refresh } = useAuth();
+  const { refresh, needsOrg, createOrg } = useAuth();
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Fallback path (LLD §7.1): an Owner who abandoned signup between email
+  // confirmation and first login has no workspace and no stashed name.
+  const [orgName, setOrgName] = useState("");
+  const [orgSaving, setOrgSaving] = useState(false);
+
   const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
   const passwordsMismatch = confirmPassword.length > 0 && password !== confirmPassword;
+
+  async function handleCreateOrg(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setOrgSaving(true);
+    try {
+      await createOrg(orgName.trim());
+      router.push("/dashboard");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Couldn't create your workspace.");
+    } finally {
+      setOrgSaving(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -44,10 +63,55 @@ export default function OnboardingPage() {
     }
   }
 
+  // An Owner with no workspace can do nothing else until one exists — every
+  // API call 403s with org_not_provisioned — so this takes over the page.
+  if (needsOrg) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-orange-50 via-white to-white p-6">
+        <div className="w-full max-w-md space-y-8">
+          <div className="flex flex-col items-center gap-3 text-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.svg" alt="TestFlow" className="w-12 h-12 rounded-2xl shadow-lg shadow-primary/20" />
+            <div>
+              <h1 className="text-2xl font-extrabold text-foreground tracking-tight">
+                Name your workspace
+              </h1>
+              <p className="text-muted-foreground mt-1.5 text-sm">
+                Your team and projects will live here. You can rename it later.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white border border-border rounded-2xl shadow-sm p-8">
+            <form onSubmit={handleCreateOrg} className="space-y-5">
+              <div className="space-y-1.5">
+                <Label htmlFor="org-name" className="text-sm font-semibold text-foreground">
+                  Workspace name
+                </Label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                  <Input id="org-name" type="text" placeholder="Acme QA" value={orgName}
+                    onChange={(e) => setOrgName(e.target.value)}
+                    className="h-11 pl-9 text-sm" maxLength={60} autoFocus required />
+                </div>
+              </div>
+              <ErrorAlert message={error} className="bg-destructive/8 py-2.5 font-medium" />
+              <Button type="submit" className="w-full h-11 font-semibold text-sm tracking-wide"
+                disabled={orgSaving || !orgName.trim()}>
+                {orgSaving ? "Creating…" : "Create workspace"}
+              </Button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-orange-50 via-white to-white p-6">
       <div className="w-full max-w-md space-y-8">
         <div className="flex flex-col items-center gap-3 text-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.svg" alt="TestFlow" className="w-12 h-12 rounded-2xl shadow-lg shadow-primary/20" />
           <div>
             <h1 className="text-2xl font-extrabold text-foreground tracking-tight">Welcome to TestFlow</h1>

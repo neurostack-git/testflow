@@ -3,19 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
-import { LayoutDashboard, Settings2, User, LogOut, Trash2, X } from "lucide-react";
+import { LayoutDashboard, Users, User, LogOut, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { canViewTeam, type Role } from "@/lib/permissions";
 
-const adminNav = [
+// The Team page is Developer/Owner only (D12). Everything else is org-wide,
+// including the Bin, which Testers see read-only (A3).
+const navFor = (role: Role) => [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin", label: "Admin", icon: Settings2 },
-  { href: "/profile", label: "Profile", icon: User },
-];
-
-const testerNav = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  ...(canViewTeam(role) ? [{ href: "/team", label: "Team", icon: Users }] : []),
   { href: "/profile", label: "Profile", icon: User },
 ];
 
@@ -23,7 +21,7 @@ const INACTIVITY_MS = 10 * 60 * 1000;
 const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"] as const;
 
 interface SidebarProps {
-  role: "admin" | "tester";
+  role: Role;
   userName: string;
   userEmail: string;
   open: boolean;
@@ -32,8 +30,8 @@ interface SidebarProps {
 
 export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { logout, avatarUrl } = useAuth();
-  const nav = role === "admin" ? adminNav : testerNav;
+  const { logout, avatarUrl, orgName } = useAuth();
+  const nav = navFor(role);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Close sidebar when navigating (mobile)
@@ -73,7 +71,12 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
           <img src="/logo.svg" alt="TestFlow" className="w-8 h-8 rounded-lg block dark:hidden" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo-mono.svg" alt="TestFlow" className="w-8 h-8 rounded-lg hidden dark:block" />
-          <span className="text-lg font-bold text-foreground tracking-tight">TestFlow</span>
+          <div className="min-w-0">
+            <div className="text-lg font-bold text-foreground tracking-tight leading-tight">TestFlow</div>
+            {orgName && (
+              <div className="text-xs text-muted-foreground truncate max-w-[9rem]">{orgName}</div>
+            )}
+          </div>
         </div>
         <button
           onClick={onClose}
@@ -93,7 +96,7 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
             className={cn(
               "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150",
               pathname === href || pathname.startsWith(href + "/")
-                ? "bg-gradient-to-r from-primary to-primary/80 text-white shadow-sm shadow-primary/25 dark:text-primary-foreground"
+                ? "bg-gradient-to-r from-primary to-primary/80 text-primary-foreground shadow-sm shadow-primary/25"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             )}
           >
@@ -126,7 +129,7 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
           className={cn(
             "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150",
             pathname === "/bin"
-              ? "bg-gradient-to-r from-primary to-primary/80 text-white shadow-sm shadow-primary/25 dark:text-primary-foreground"
+              ? "bg-gradient-to-r from-primary to-primary/80 text-primary-foreground shadow-sm shadow-primary/25"
               : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           )}
         >

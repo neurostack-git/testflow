@@ -51,9 +51,9 @@ export function StatusBadge({
                 key={s}
                 disabled={isCurrent || !isAllowed}
                 onClick={() => isAllowed && onStatusChange?.(s as BugStatus)}
-                className={cn("gap-2", isInvalidStatus && "text-red-500 focus:text-red-500")}
+                className={cn("gap-2", isInvalidStatus && "text-red-500 focus:text-red-500 dark:text-red-400 dark:focus:text-red-400")}
               >
-                {Icon && <Icon className={cn("w-3.5 h-3.5 shrink-0", isInvalidStatus ? "text-red-500" : STATUS_ICON_COLORS[s])} />}
+                {Icon && <Icon className={cn("w-3.5 h-3.5 shrink-0", isInvalidStatus ? "text-red-500 dark:text-red-400" : STATUS_ICON_COLORS[s])} />}
                 <span className={isCurrent ? "font-semibold" : ""}>{s}</span>
                 {isCurrent && <Check className="w-3 h-3 ml-auto opacity-70" />}
               </DropdownMenuItem>
@@ -89,9 +89,9 @@ export function StatusBadge({
             <DropdownMenuItem
               key={s}
               onClick={() => onStatusChange?.(s as BugStatus)}
-              className={cn("gap-2", isInvalidStatus && "text-red-500 focus:text-red-500")}
+              className={cn("gap-2", isInvalidStatus && "text-red-500 focus:text-red-500 dark:text-red-400 dark:focus:text-red-400")}
             >
-              {Icon && <Icon className={cn("w-3.5 h-3.5 shrink-0", isInvalidStatus ? "text-red-500" : STATUS_ICON_COLORS[s])} />}
+              {Icon && <Icon className={cn("w-3.5 h-3.5 shrink-0", isInvalidStatus ? "text-red-500 dark:text-red-400" : STATUS_ICON_COLORS[s])} />}
               {s}
             </DropdownMenuItem>
           );

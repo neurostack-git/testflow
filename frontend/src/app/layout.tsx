@@ -8,7 +8,7 @@ import { ThemeProvider } from "@/context/theme-context";
 // auth routes never flash dark). Mirrors the ThemeProvider's scoping rules.
 const themeScript = `(function(){try{
   var p = window.location.pathname;
-  var locked = (p === '/' || p === '/login' || p === '/signup' || p === '/onboarding');
+  var locked = (p === '/' || p === '/login' || p === '/signup' || p === '/onboarding' || p === '/forgot-password');
   if (!locked && localStorage.getItem('tf-theme') === 'dark') {
     document.documentElement.classList.add('dark');
   } else {

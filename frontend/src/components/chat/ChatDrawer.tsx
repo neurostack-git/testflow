@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { useProjectChat } from "@/hooks/useProjectChat";
 import { chatApi, attachmentsApi, type ChatMember } from "@/lib/api";
 import { Spinner } from "@/components/ui/spinner";
+import { canClearChat, type Role } from "@/lib/permissions";
 
 interface ChatDrawerProps {
   projectId: string;
@@ -14,7 +15,7 @@ interface ChatDrawerProps {
   onClose: () => void;
   currentUserSub: string;
   currentUserName: string;
-  currentUserRole: "admin" | "tester";
+  currentUserRole: Role;
 }
 
 // Highlight @Name tokens that match a project member's name
@@ -230,7 +231,7 @@ export function ChatDrawer({
       {/* Overlay (mobile) */}
       {open && (
         <div
-          className="fixed inset-0 z-40 bg-black/30 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/30 dark:bg-black/65 lg:hidden"
           onClick={onClose}
         />
       )}
@@ -251,7 +252,7 @@ export function ChatDrawer({
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {connected ? (
-              <span title="Connected"><Wifi className="w-3.5 h-3.5 text-green-500" /></span>
+              <span title="Connected"><Wifi className="w-3.5 h-3.5 text-green-600 dark:text-green-400" /></span>
             ) : reconnectFailed ? (
               <span title="Connection lost"><WifiOff className="w-3.5 h-3.5 text-destructive" /></span>
             ) : (
@@ -259,7 +260,7 @@ export function ChatDrawer({
             )}
 
             {/* Clear chat — admin only */}
-            {currentUserRole === "admin" && (
+            {canClearChat(currentUserRole) && (
               clearConfirm ? (
                 <div className="flex items-center gap-1">
                   <span className="text-[11px] text-muted-foreground">

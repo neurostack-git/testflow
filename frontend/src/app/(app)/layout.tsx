@@ -8,15 +8,21 @@ import { Menu } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, role, needsOrg } = useAuth();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/login");
+      return;
     }
-  }, [user, loading, router]);
+    // A confirmed Owner with no workspace yet must name one before the app is
+    // usable — every API call 403s with org_not_provisioned until they do.
+    if (!loading && user && needsOrg) {
+      router.replace("/onboarding");
+    }
+  }, [user, loading, needsOrg, router]);
 
   if (loading) {
     return (
@@ -26,7 +32,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user) return null;
+  if (!user || needsOrg) return null;
 
   return (
     <div className="flex min-h-screen bg-background tf-dot-bg">
@@ -39,7 +45,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       )}
 
       <Sidebar
-        role={user.role}
+        role={role}
         userName={user.name}
         userEmail={user.email}
         open={sidebarOpen}

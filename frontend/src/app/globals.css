@@ -50,6 +50,7 @@
 
 :root {
   /* Soft amber-orange — warm but not intense */
+  color-scheme: light;
   --background: oklch(1 0 0);
   --foreground: oklch(0.18 0.02 260);
   --card: oklch(1 0 0);
@@ -84,43 +85,66 @@
   --sidebar-ring: oklch(0.72 0.15 50);
 }
 
-/* ── Dark mode — pure black & white palette (no orange). ──────────────────────
+/* ── Dark mode ────────────────────────────────────────────────────────────────
    Applied only when <html> has the .dark class (see ThemeProvider).
-   Light-mode :root above is intentionally left untouched.                     */
+   Light-mode :root above is intentionally left untouched.
+
+   Design rules this palette follows:
+   1. Neutrals carry a trace of the brand hue (55) at chroma ~0.006–0.012 rather
+      than being pure grey. Fully achromatic greys read as dead/cheap on screen.
+   2. Surfaces form a deliberate elevation ladder — sidebar recedes below the
+      canvas, card and popover rise above it, each step ≥0.02 L apart so the
+      `ring-foreground/10` edge on Card reads as elevation instead of noise.
+   3. The brand orange is retained, re-tuned for a dark canvas (lighter, slightly
+      less chromatic). Dark text sits on it, which is what makes it legible.
+   4. Nothing is pure black or pure white: pure black crushes elevation and pure
+      white halates against it.                                                */
 .dark {
-  --background: oklch(0.15 0 0);
-  --foreground: oklch(0.98 0 0);
-  --card: oklch(0.19 0 0);
-  --card-foreground: oklch(0.98 0 0);
-  --popover: oklch(0.18 0 0);
-  --popover-foreground: oklch(0.98 0 0);
-  /* primary becomes white so every orange surface/text reads as white-on-black */
-  --primary: oklch(0.98 0 0);
-  --primary-foreground: oklch(0.16 0 0);
-  --secondary: oklch(0.25 0 0);
-  --secondary-foreground: oklch(0.98 0 0);
-  --muted: oklch(0.23 0 0);
-  --muted-foreground: oklch(0.68 0 0);
-  --accent: oklch(0.27 0 0);
-  --accent-foreground: oklch(0.98 0 0);
-  /* destructive kept functional (red) so delete actions remain legible */
-  --destructive: oklch(0.62 0.21 25);
-  --border: oklch(0.28 0 0);
-  --input: oklch(0.30 0 0);
-  --ring: oklch(0.70 0 0);
-  --chart-1: oklch(0.98 0 0);
-  --chart-2: oklch(0.80 0 0);
-  --chart-3: oklch(0.65 0 0);
-  --chart-4: oklch(0.50 0 0);
-  --chart-5: oklch(0.35 0 0);
-  --sidebar: oklch(0.13 0 0);
-  --sidebar-foreground: oklch(0.98 0 0);
-  --sidebar-primary: oklch(0.98 0 0);
-  --sidebar-primary-foreground: oklch(0.16 0 0);
-  --sidebar-accent: oklch(0.25 0 0);
-  --sidebar-accent-foreground: oklch(0.98 0 0);
-  --sidebar-border: oklch(0.28 0 0);
-  --sidebar-ring: oklch(0.70 0 0);
+  color-scheme: dark;
+
+  /* Surfaces — recessed → canvas → raised → floating */
+  --sidebar: oklch(0.140 0.006 55);
+  --background: oklch(0.165 0.006 55);
+  --card: oklch(0.205 0.007 55);
+  --popover: oklch(0.225 0.008 55);
+  --muted: oklch(0.245 0.007 55);
+  --secondary: oklch(0.250 0.008 55);
+  --accent: oklch(0.285 0.012 55);
+
+  /* Text — soft white, never oklch(1 0 0) */
+  --foreground: oklch(0.965 0.003 55);
+  --card-foreground: oklch(0.965 0.003 55);
+  --popover-foreground: oklch(0.965 0.003 55);
+  --secondary-foreground: oklch(0.965 0.003 55);
+  --sidebar-foreground: oklch(0.965 0.003 55);
+  --muted-foreground: oklch(0.715 0.012 55); /* 7.6:1 on --background, 7.1:1 on --card */
+  --accent-foreground: oklch(0.800 0.130 58);
+
+  /* Brand — kept in dark mode, re-tuned for a dark canvas */
+  --primary: oklch(0.705 0.160 52);
+  --primary-foreground: oklch(0.160 0.030 50); /* 7.1:1 on --primary */
+  --sidebar-primary: oklch(0.705 0.160 52);
+  --sidebar-primary-foreground: oklch(0.160 0.030 50);
+  --sidebar-accent: oklch(0.260 0.011 55);
+  --sidebar-accent-foreground: oklch(0.965 0.003 55);
+
+  /* Lines — lighter than the surfaces they separate */
+  --border: oklch(0.300 0.008 55);
+  --input: oklch(0.330 0.010 55);
+  --sidebar-border: oklch(0.270 0.007 55);
+
+  /* Focus rings stay branded so keyboard nav is obvious */
+  --ring: oklch(0.720 0.160 52);
+  --sidebar-ring: oklch(0.720 0.160 52);
+
+  --destructive: oklch(0.645 0.190 26);
+
+  /* Brand ramp, mirroring the light-mode ordering */
+  --chart-1: oklch(0.72 0.155 52);
+  --chart-2: oklch(0.80 0.120 58);
+  --chart-3: oklch(0.63 0.140 50);
+  --chart-4: oklch(0.87 0.080 62);
+  --chart-5: oklch(0.52 0.120 48);
 }
 
 @keyframes tf-fade-up {
@@ -196,7 +220,7 @@
     background-size: 22px 22px;
   }
   .dark .tf-dot-bg {
-    background-image: radial-gradient(circle, oklch(1 0 0 / 0.10) 1px, transparent 1px);
+    background-image: radial-gradient(circle, oklch(0.78 0.02 55 / 0.13) 1px, transparent 1px);
   }
   .tf-bug-fly {
     animation: tf-bug-fly 10s linear 1.2s infinite both;

@@ -1,88 +1,68 @@
-import os
-import boto3
-from boto3.dynamodb.conditions import Key
-from botocore.exceptions import ClientError
-from datetime import datetime, timezone
+"""Cognito PostAuthentication trigger — fires after every successful sign-in.
 
-dynamodb = boto3.resource("dynamodb")
-TABLE_NAME = os.environ["TABLE_NAME"]
-table = dynamodb.Table(TABLE_NAME)
+Under the org model this does almost nothing: the invite already wrote both the
+membership and the profile (LLD §7.2), so there is no PENDING# conversion and no
+per-project fan-out. All that remains is flipping a pending member to active and
+picking up a display name set during onboarding.
+
+This function is deliberately given ONLY TABLE_NAME. Passing USER_POOL_ID would
+create a circular CloudFormation dependency, because the trigger is attached to
+the very pool that would supply it.
+"""
+
+from tfcommon.db import PROFILE, get_item, member_sk, now_iso, org_pk, table, user_pk
+from tfcommon.org import MEMBER_ACTIVE, MEMBER_PENDING
 
 
 def lambda_handler(event: dict, context) -> dict:
-    """
-    Cognito PostAuthentication trigger.
-    Fires after every successful sign-in.
-    On first login: creates profile and converts pending invites to project memberships.
-    On subsequent logins: no-op (idempotent).
-    """
-    user_attrs = event.get("request", {}).get("userAttributes", {})
-    sub = user_attrs.get("sub", "")
-    email = user_attrs.get("email", "")
-    role = user_attrs.get("custom:role", "tester")
-    name = user_attrs.get("name") or email.split("@")[0]
-
+    attrs = event.get("request", {}).get("userAttributes", {})
+    sub = attrs.get("sub", "")
     if not sub:
-        return event  # Safety — triggers must always return event
+        return event  # Triggers must always return the event unchanged.
 
-    # 1. Create profile on first login (conditional put is a no-op if already exists)
     try:
-        table.put_item(
-            Item={
-                "PK": f"USER#{sub}",
-                "SK": "PROFILE",
-                "email": email,
-                "name": name,
-                "role": role,
-                "phone": "",
-            },
-            ConditionExpression="attribute_not_exists(PK)",
+        _activate(sub, attrs)
+    except Exception as err:  # noqa: BLE001
+        # Never block a login on bookkeeping — log and let the sign-in proceed.
+        print(f"post_auth: {type(err).__name__}: {err}")
+
+    return event
+
+
+def _activate(sub: str, attrs: dict) -> None:
+    profile = get_item(user_pk(sub), PROFILE)
+    if not profile:
+        # Owner who has confirmed signup but not yet called POST /org (LLD §7.1).
+        # The frontend bootstraps the workspace on the next request.
+        return
+
+    org_id = profile.get("orgId")
+    if not org_id:
+        return
+
+    name = (attrs.get("name") or "").strip()
+    now = now_iso()
+
+    member = get_item(org_pk(org_id), member_sk(sub))
+    if member and member.get("status") == MEMBER_PENDING:
+        table.update_item(
+            Key={"PK": org_pk(org_id), "SK": member_sk(sub)},
+            UpdateExpression="SET #s = :active, joinedAt = :now",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":active": MEMBER_ACTIVE, ":now": now},
         )
-    except ClientError as e:
-        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
-            raise  # Unexpected error — let it bubble so Cognito can log it
 
-    # 2. Convert PENDING# invite items into real MEMBER# records
-    pending = table.query(
-        KeyConditionExpression=Key("PK").eq(f"USER#{sub}") & Key("SK").begins_with("PENDING#"),
-    ).get("Items", [])
-
-    if pending:
-        # Use invitedBy from the PENDING record to find ALL of the admin's current
-        # projects — this covers projects created after the invite was sent but
-        # before the tester accepted, which would have no PENDING# record.
-        admin_sub = pending[0].get("invitedBy", "")
-        project_ids_to_join = {item["SK"].replace("PENDING#", "") for item in pending}
-
-        if admin_sub:
-            admin_projects = table.query(
-                IndexName="GSI1",
-                KeyConditionExpression=Key("GSI1PK").eq(f"ADMIN#{admin_sub}"),
-            ).get("Items", [])
-            for proj in admin_projects:
-                if proj.get("SK") == "METADATA" and proj.get("projectId") and not proj.get("deletedAt"):
-                    project_ids_to_join.add(proj["projectId"])
-
-        now = datetime.now(timezone.utc).isoformat()
-        for project_id in project_ids_to_join:
-            try:
-                table.put_item(
-                    Item={
-                        "PK": f"PROJECT#{project_id}",
-                        "SK": f"MEMBER#{sub}",
-                        "email": email,
-                        "role": "tester",
-                        "joinedAt": now,
-                        "GSI1PK": f"USER#{sub}",
-                        "GSI1SK": f"PROJECT#{project_id}",
-                    },
-                    ConditionExpression="attribute_not_exists(SK)",
-                )
-            except Exception:
-                pass  # Already a member — fine
-
-        # Delete all PENDING records
-        for item in pending:
-            table.delete_item(Key={"PK": f"USER#{sub}", "SK": item["SK"]})
-
-    return event  # Cognito triggers must return the event unchanged
+    # Adopt the display name the user set during onboarding, if any.
+    if name and name != profile.get("name"):
+        table.update_item(
+            Key={"PK": user_pk(sub), "SK": PROFILE},
+            UpdateExpression="SET #n = :n",
+            ExpressionAttributeNames={"#n": "name"},
+            ExpressionAttributeValues={":n": name},
+        )
+        table.update_item(
+            Key={"PK": org_pk(org_id), "SK": member_sk(sub)},
+            UpdateExpression="SET #n = :n",
+            ExpressionAttributeNames={"#n": "name"},
+            ExpressionAttributeValues={":n": name},
+        )

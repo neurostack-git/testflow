@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  ArrowLeft, UserPlus, FileText, Image, Video, Info,
+  ArrowLeft, FileText, Image, Video, Info,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,7 @@ import { useAuth } from "@/context/auth-context";
 import { ChatDrawer } from "@/components/chat/ChatDrawer";
 import { MessageCircle } from "lucide-react";
 import { trimName, displayFilename } from "@/lib/filenames";
-import { ADMIN_TRANSITIONS, TESTER_TRANSITIONS } from "@/lib/bug-status";
+import { transitionMatrix } from "@/lib/bug-status";
 import { StatusGuideDialog } from "@/components/projects/StatusGuideDialog";
 import { VideoPlayer } from "@/components/projects/VideoPlayer";
 import { DeleteBugDialog } from "@/components/projects/DeleteBugDialog";
@@ -28,14 +28,13 @@ import { BugTable } from "@/components/projects/BugTable";
 import { BugCreateDialog } from "@/components/projects/BugCreateDialog";
 import { BugEditDialog } from "@/components/projects/BugEditDialog";
 import { ProjectReportsSection } from "@/components/projects/ProjectReportsSection";
-import { InviteTesterDialog } from "@/components/projects/InviteTesterDialog";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { Spinner } from "@/components/ui/spinner";
 import { ErrorAlert } from "@/components/ui/error-alert";
 
 export default function ProjectDetailPage() {
   const { id: projectId } = useParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user, role } = useAuth();
 
   // Core data
   const [project, setProject] = useState<Project | null>(null);
@@ -57,9 +56,6 @@ export default function ProjectDetailPage() {
   // Delete bug confirm dialog
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; bug: Bug | null }>({ open: false, bug: null });
   const [deleting, setDeleting] = useState(false);
-
-  // Invite tester dialog
-  const [inviteOpen, setInviteOpen] = useState(false);
 
   // Screenshot lightbox
   const [lightbox, setLightbox] = useState<{ screenshots: string[]; index: number } | null>(null);
@@ -90,8 +86,7 @@ export default function ProjectDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const role = user?.role ?? "tester";
-  const transitions = role === "admin" ? ADMIN_TRANSITIONS : TESTER_TRANSITIONS;
+  const transitions = transitionMatrix(role);
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -177,17 +172,6 @@ export default function ProjectDetailPage() {
           <h1 className="text-2xl font-bold text-foreground">{project?.title ?? "Project"}</h1>
         </div>
         <div className="flex items-center gap-2">
-          {role === "admin" && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5 text-primary border-primary/30 hover:bg-primary/5"
-              onClick={() => setInviteOpen(true)}
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              Invite Tester
-            </Button>
-          )}
           <button
             onClick={() => setStatusInfoOpen(true)}
             className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
@@ -199,11 +183,6 @@ export default function ProjectDetailPage() {
       </div>
       <div className="flex items-center justify-between mb-4">
         <p className="text-muted-foreground ml-7">{bugs.length} bug{bugs.length !== 1 ? "s" : ""}</p>
-        {role === "tester" && project?.adminName && (
-          <p className="text-sm text-muted-foreground">
-            Developer: <span className="font-medium text-foreground">{project.adminName}</span>
-          </p>
-        )}
       </div>
 
       {/* Summary stats */}
@@ -239,9 +218,6 @@ export default function ProjectDetailPage() {
 
       {/* Reports section */}
       <ProjectReportsSection projectId={projectId} />
-
-      {/* Invite Tester Dialog */}
-      <InviteTesterDialog open={inviteOpen} projectId={projectId} onOpenChange={setInviteOpen} />
 
       {/* Bug Create Dialog */}
       <BugCreateDialog

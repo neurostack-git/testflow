@@ -1,144 +1,146 @@
-import json
+"""Profile, avatar and phone verification (LLD §9.4).
+
+Password changes are NOT here — both the signed-in change and the forgotten
+password reset are pure client-side Cognito calls via Amplify (LLD §7.4), so
+they need no endpoint, no IAM and no server state.
+"""
+
 import os
 import secrets
 import time
-import boto3
-from boto3.dynamodb.conditions import Key
-from botocore.config import Config
-from botocore.exceptions import ClientError
 from datetime import datetime, timezone
 
-dynamodb = boto3.resource("dynamodb")
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
+
+from tfcommon.auth import get_caller
+from tfcommon.db import (
+    METADATA,
+    OTP_PHONE,
+    PROFILE,
+    get_item,
+    member_sk,
+    org_pk,
+    otp_pk,
+    table,
+    user_pk,
+)
+from tfcommon.http import ApiError, api_handler, json_body, not_found, required, response
+
 cognito = boto3.client("cognito-idp")
 sns = boto3.client("sns", region_name="ap-south-1")
 s3 = boto3.client("s3", config=Config(signature_version="s3v4"))
 
-TABLE_NAME = os.environ["TABLE_NAME"]
 USER_POOL_ID = os.environ["USER_POOL_ID"]
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
-table = dynamodb.Table(TABLE_NAME)
 
-OTP_TTL_SECONDS = 600  # 10 minutes
-
-
-def response(status: int, body) -> dict:
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-        "body": json.dumps(body),
-    }
+OTP_TTL_SECONDS = 600
+MAX_NAME = 60
 
 
+@api_handler
 def lambda_handler(event: dict, context) -> dict:
     route = event.get("routeKey", "")
-    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
-    user_sub = claims.get("sub")
-    user_email = claims.get("email", "")
+    caller = get_caller(event)
 
     if route == "GET /users/me":
-        return get_profile(user_sub)
+        return get_profile(caller)
     if route == "PATCH /users/me":
-        return update_profile(event, user_sub, user_email)
+        return update_profile(event, caller)
     if route == "POST /users/me/phone/send-otp":
-        return send_phone_otp(event, user_sub)
+        return send_phone_otp(event, caller)
     if route == "POST /users/me/phone/verify-otp":
-        return verify_phone_otp(event, user_sub)
+        return verify_phone_otp(event, caller)
     if route == "POST /users/me/avatar/presign":
-        return presign_avatar(user_sub)
+        return presign_avatar(caller)
     if route == "PATCH /users/me/avatar":
-        return update_avatar(event, user_sub)
+        return update_avatar(event, caller)
     if route == "DELETE /users/me/avatar":
-        return delete_avatar(user_sub)
+        return delete_avatar(caller)
 
-    return response(404, {"error": "Not found"})
+    return not_found()
 
 
-def get_profile(user_sub: str) -> dict:
-    item = table.get_item(Key={"PK": f"USER#{user_sub}", "SK": "PROFILE"}).get("Item")
+# ── Profile ──────────────────────────────────────────────────────────────────
+
+def get_profile(caller) -> dict:
+    item = get_item(user_pk(caller.sub), PROFILE)
     if not item:
-        return response(404, {"error": "User not found"})
+        raise ApiError(404, "Profile not found.", "not_found")
     item.pop("PK", None)
     item.pop("SK", None)
 
-    if item.get("role") == "tester":
-        try:
-            memberships = table.query(
-                IndexName="GSI1",
-                KeyConditionExpression=Key("GSI1PK").eq(f"USER#{user_sub}") & Key("GSI1SK").begins_with("PROJECT#"),
-                Limit=1,
-            ).get("Items", [])
-            if memberships:
-                project_id = memberships[0]["GSI1SK"].replace("PROJECT#", "")
-                proj = table.get_item(Key={"PK": f"PROJECT#{project_id}", "SK": "METADATA"}).get("Item")
-                if proj:
-                    admin_sub = proj.get("GSI1PK", "").replace("ADMIN#", "")
-                    if admin_sub:
-                        admin_profile = table.get_item(Key={"PK": f"USER#{admin_sub}", "SK": "PROFILE"}).get("Item")
-                        if admin_profile:
-                            item["adminName"] = admin_profile.get("name", "")
-        except Exception:
-            pass
+    # Workspace context replaces the old `adminName` lookup, which walked from a
+    # tester's membership back to the owning admin.
+    org = get_item(org_pk(caller.org_id), METADATA) or {}
+    item["orgId"] = caller.org_id
+    item["orgName"] = org.get("name", "")
+    item["isOwner"] = caller.is_owner
 
     return response(200, item)
 
 
-def update_profile(event: dict, user_sub: str, user_email: str) -> dict:
-    body = json.loads(event.get("body") or "{}")
-    name = body.get("name", "").strip()
+def update_profile(event: dict, caller) -> dict:
+    body = json_body(event)
+    (name,) = required(body, "name")
+    if len(name) > MAX_NAME:
+        raise ApiError(400, f"Name must be {MAX_NAME} characters or fewer.", "name_too_long")
 
-    if not name:
-        return response(400, {"error": "name is required"})
+    table.update_item(
+        Key={"PK": user_pk(caller.sub), "SK": PROFILE},
+        UpdateExpression="SET #n = :n, email = if_not_exists(email, :e)",
+        ExpressionAttributeNames={"#n": "name"},
+        ExpressionAttributeValues={":n": name, ":e": caller.email},
+    )
+    # Keep the denormalised copy on the membership row in step, so the Team page
+    # does not need a profile read per member.
+    table.update_item(
+        Key={"PK": org_pk(caller.org_id), "SK": member_sk(caller.sub)},
+        UpdateExpression="SET #n = :n",
+        ExpressionAttributeNames={"#n": "name"},
+        ExpressionAttributeValues={":n": name},
+    )
 
-    # Upsert DynamoDB profile — ensures admin users get a full record
-    update_kwargs = {
-        "Key": {"PK": f"USER#{user_sub}", "SK": "PROFILE"},
-        "UpdateExpression": "SET #n = :n, email = if_not_exists(email, :e)",
-        "ExpressionAttributeNames": {"#n": "name"},
-        "ExpressionAttributeValues": {":n": name, ":e": user_email},
-    }
-    table.update_item(**update_kwargs)
-
-    # Also update Cognito name attribute
     try:
         cognito.admin_update_user_attributes(
             UserPoolId=USER_POOL_ID,
-            Username=user_sub,
+            Username=caller.sub,
             UserAttributes=[{"Name": "name", "Value": name}],
         )
-    except ClientError as e:
-        print(f"Cognito name update error: {e}")
+    except ClientError as err:
+        print(f"Cognito name update failed: {err}")
 
-    return response(200, {"message": "Profile updated"})
-
-
-def normalise_phone(phone: str) -> str:
-    """Strip whitespace and common formatting characters only."""
-    return phone.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    return response(200, {"name": name})
 
 
-def send_phone_otp(event: dict, user_sub: str) -> dict:
-    body = json.loads(event.get("body") or "{}")
-    raw = body.get("phone", "").strip()
+# ── Phone verification ───────────────────────────────────────────────────────
 
-    if not raw:
-        return response(400, {"error": "phone is required"})
+def _normalise_phone(phone: str) -> str:
+    for char in " -()":
+        phone = phone.replace(char, "")
+    return phone.strip()
 
-    phone = normalise_phone(raw)
+
+def send_phone_otp(event: dict, caller) -> dict:
+    body = json_body(event)
+    (raw,) = required(body, "phone")
+    phone = _normalise_phone(raw)
     if not phone.startswith("+"):
-        return response(400, {"error": "Include your country code (e.g. +1 for US, +91 for India, +44 for UK)"})
+        raise ApiError(
+            400,
+            "Include your country code (e.g. +1 for US, +91 for India, +44 for UK).",
+            "missing_country_code",
+        )
 
     otp = str(secrets.randbelow(1000000)).zfill(6)
-    # DynamoDB TTL attribute (epoch seconds) — auto-purges expired OTP rows.
-    # Note: the verify step below still enforces expiry in-app, since DynamoDB
-    # TTL deletion is eventual (can lag the timestamp by up to ~48h).
+    # TTL auto-purges the row, but verify_phone_otp still checks expiry in-app
+    # because DynamoDB TTL deletion can lag the timestamp by up to ~48h.
     expires_at = int(time.time()) + OTP_TTL_SECONDS
 
     table.put_item(Item={
-        "PK": f"OTP#{user_sub}",
-        "SK": "PHONE",
-        "otp": otp,
-        "phone": phone,
-        "expiresAt": expires_at,
+        "PK": otp_pk(caller.sub), "SK": OTP_PHONE,
+        "otp": otp, "phone": phone, "expiresAt": expires_at,
     })
 
     try:
@@ -146,103 +148,94 @@ def send_phone_otp(event: dict, user_sub: str) -> dict:
             PhoneNumber=phone,
             Message=f"Your TestFlow verification code is: {otp}. Valid for 10 minutes.",
         )
-    except ClientError as e:
-        return response(500, {"error": f"Failed to send SMS: {e.response['Error']['Message']}"})
+    except ClientError as err:
+        raise ApiError(
+            500,
+            f"Couldn't send the SMS: {err.response['Error']['Message']}",
+            "sms_failed",
+        )
 
-    return response(200, {"message": "OTP sent"})
+    return response(200, {"sent": True})
 
 
-def verify_phone_otp(event: dict, user_sub: str) -> dict:
-    body = json.loads(event.get("body") or "{}")
-    otp = body.get("otp", "").strip()
+def verify_phone_otp(event: dict, caller) -> dict:
+    body = json_body(event)
+    (otp,) = required(body, "otp")
 
-    otp_item = table.get_item(Key={"PK": f"OTP#{user_sub}", "SK": "PHONE"}).get("Item")
+    record = get_item(otp_pk(caller.sub), OTP_PHONE)
+    if not record:
+        raise ApiError(400, "No pending verification. Please request a new code.", "no_otp")
+    if int(record.get("expiresAt", 0)) < int(time.time()):
+        raise ApiError(400, "That code has expired. Please request a new one.", "otp_expired")
+    if record.get("otp") != otp:
+        raise ApiError(400, "Invalid code. Please try again.", "otp_invalid")
 
-    if not otp_item:
-        return response(400, {"error": "No pending verification. Please request a new code."})
-
-    # Read new attribute, falling back to the legacy "ttl" for OTPs issued
-    # before the attribute rename (handles the deploy transition window).
-    otp_expiry = otp_item.get("expiresAt", otp_item.get("ttl", 0))
-    if otp_expiry < int(time.time()):
-        return response(400, {"error": "Code has expired. Please request a new one."})
-
-    if otp_item.get("otp") != otp:
-        return response(400, {"error": "Invalid code. Please try again."})
-
-    phone = otp_item.get("phone")
-
-    # Save phone to DynamoDB
+    phone = record.get("phone", "")
     table.update_item(
-        Key={"PK": f"USER#{user_sub}", "SK": "PROFILE"},
+        Key={"PK": user_pk(caller.sub), "SK": PROFILE},
         UpdateExpression="SET phone = :p",
         ExpressionAttributeValues={":p": phone},
     )
 
-    # Save phone to Cognito custom attribute
     try:
         cognito.admin_update_user_attributes(
             UserPoolId=USER_POOL_ID,
-            Username=user_sub,
+            Username=caller.sub,
             UserAttributes=[{"Name": "custom:phone_number", "Value": phone}],
         )
-    except ClientError as e:
-        print(f"Cognito phone update error: {e}")
+    except ClientError as err:
+        print(f"Cognito phone update failed: {err}")
 
-    # Delete OTP record
-    table.delete_item(Key={"PK": f"OTP#{user_sub}", "SK": "PHONE"})
-
-    return response(200, {"message": "Phone verified and saved", "phone": phone})
+    table.delete_item(Key={"PK": otp_pk(caller.sub), "SK": OTP_PHONE})
+    return response(200, {"phone": phone})
 
 
-# ── Avatar ────────────────────────────────────────────────────────────────────
+# ── Avatar ───────────────────────────────────────────────────────────────────
 
-def presign_avatar(user_sub: str) -> dict:
+def presign_avatar(caller) -> dict:
     if not BUCKET_NAME:
-        return response(500, {"error": "Storage not configured"})
+        raise ApiError(500, "Storage is not configured.", "no_storage")
     timestamp = int(datetime.now(timezone.utc).timestamp())
-    key = f"avatars/{user_sub}/{timestamp}.jpg"
-    presigned_url = s3.generate_presigned_url(
+    key = f"avatars/{caller.sub}/{timestamp}.jpg"
+    url = s3.generate_presigned_url(
         "put_object",
         Params={"Bucket": BUCKET_NAME, "Key": key, "ContentType": "image/jpeg"},
         ExpiresIn=300,
     )
-    return response(200, {"presignedUrl": presigned_url, "s3Key": key})
+    return response(200, {"presignedUrl": url, "s3Key": key})
 
 
-def update_avatar(event: dict, user_sub: str) -> dict:
-    body = json.loads(event.get("body") or "{}")
-    s3_key = body.get("s3Key", "").strip()
-    if not s3_key:
-        return response(400, {"error": "s3Key is required"})
+def update_avatar(event: dict, caller) -> dict:
+    body = json_body(event)
+    (s3_key,) = required(body, "s3Key")
 
-    # Delete old avatar from S3 if it exists
-    old = table.get_item(Key={"PK": f"USER#{user_sub}", "SK": "PROFILE"}).get("Item", {})
-    old_key = old.get("avatarKey")
-    if old_key and old_key != s3_key and BUCKET_NAME:
-        try:
-            s3.delete_object(Bucket=BUCKET_NAME, Key=old_key)
-        except Exception:
-            pass
+    existing = get_item(user_pk(caller.sub), PROFILE) or {}
+    old_key = existing.get("avatarKey")
+    if old_key and old_key != s3_key:
+        _delete_object(old_key)
 
     table.update_item(
-        Key={"PK": f"USER#{user_sub}", "SK": "PROFILE"},
+        Key={"PK": user_pk(caller.sub), "SK": PROFILE},
         UpdateExpression="SET avatarKey = :k",
         ExpressionAttributeValues={":k": s3_key},
     )
-    return response(200, {"message": "Avatar updated", "avatarKey": s3_key})
+    return response(200, {"avatarKey": s3_key})
 
 
-def delete_avatar(user_sub: str) -> dict:
-    item = table.get_item(Key={"PK": f"USER#{user_sub}", "SK": "PROFILE"}).get("Item", {})
-    s3_key = item.get("avatarKey")
-    if s3_key and BUCKET_NAME:
-        try:
-            s3.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
-        except Exception:
-            pass
+def delete_avatar(caller) -> dict:
+    existing = get_item(user_pk(caller.sub), PROFILE) or {}
+    _delete_object(existing.get("avatarKey"))
     table.update_item(
-        Key={"PK": f"USER#{user_sub}", "SK": "PROFILE"},
+        Key={"PK": user_pk(caller.sub), "SK": PROFILE},
         UpdateExpression="REMOVE avatarKey",
     )
-    return response(200, {"message": "Avatar deleted"})
+    return response(200, {"deleted": True})
+
+
+def _delete_object(key) -> None:
+    if not key or not BUCKET_NAME:
+        return
+    try:
+        s3.delete_object(Bucket=BUCKET_NAME, Key=key)
+    except Exception as err:  # noqa: BLE001
+        print(f"S3 delete failed: {err}")

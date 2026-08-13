@@ -47,12 +47,12 @@ export function SummaryStats({
       onClick: () => { setSummaryFilter(null); setTesterFilter(null); setActiveTab("All"); },
     },
     {
-      label: "Unsolved", value: unsolved, color: "text-orange-500 dark:text-white",
+      label: "Unsolved", value: unsolved, color: "text-primary",
       active: summaryFilter === "unsolved",
       onClick: () => { setSummaryFilter(summaryFilter === "unsolved" ? null : "unsolved"); setTesterFilter(null); setActiveTab("All"); },
     },
     {
-      label: "Today", value: todayCount, color: "text-blue-600",
+      label: "Today", value: todayCount, color: "text-blue-600 dark:text-blue-400",
       active: summaryFilter === "today",
       onClick: () => { setSummaryFilter(summaryFilter === "today" ? null : "today"); setTesterFilter(null); setActiveTab("All"); },
     },
