@@ -11,6 +11,7 @@ import Link from "next/link";
 import { projectsApi, type Project } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { canCreateProject } from "@/lib/permissions";
+import { ProjectCard } from "@/components/projects/ProjectCard";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { Spinner } from "@/components/ui/spinner";
 import { ErrorAlert } from "@/components/ui/error-alert";
@@ -121,39 +122,16 @@ export default function DashboardPage() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5 items-stretch">
           {projects.map((project) => (
-            <div key={project.projectId} className="relative group">
-              <Link href={`/projects/${project.projectId}`} className="block">
-                <Card className="p-5 hover:shadow-lg hover:shadow-primary/8 hover:-translate-y-0.5 hover:border-primary/25 transition-all duration-200 cursor-pointer bg-card/80 backdrop-blur-sm">
-                  <div className="mb-4">
-                    <div className="w-10 h-10 bg-gradient-to-br from-primary/20 to-primary/5 rounded-xl flex items-center justify-center group-hover:from-primary/30 group-hover:to-primary/10 transition-all duration-200">
-                      <Bug className="w-5 h-5 text-primary" />
-                    </div>
-                  </div>
-                  <h3 className="font-semibold text-foreground text-base mb-1 group-hover:text-primary transition-colors">
-                    {project.title}
-                  </h3>
-                  <div className="flex items-center justify-between mt-1">
-                    <p className="text-sm text-muted-foreground">
-                      {project.memberCount ?? 0} member{(project.memberCount ?? 0) !== 1 ? "s" : ""}
-                    </p>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(project.createdAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                </Card>
-              </Link>
-              {canManage && (
-                <button
-                  onClick={() => setBinConfirm({ open: true, projectId: project.projectId, title: project.title })}
-                  className="absolute top-3 right-3 z-10 p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
-                  title="Move to bin"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
+            <ProjectCard
+              key={project.projectId}
+              project={project}
+              canManage={canManage}
+              onMoveToBin={(p) =>
+                setBinConfirm({ open: true, projectId: p.projectId, title: p.title })
+              }
+            />
           ))}
         </div>
       )}

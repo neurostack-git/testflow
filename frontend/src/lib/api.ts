@@ -263,6 +263,9 @@ export interface OrgMember {
   joinedAt: string;
 }
 
+/** Status tally for the dashboard card. Keys mirror BugStatus, plus `total`. */
+export type BugStats = Partial<Record<BugStatus, number>> & { total: number };
+
 export interface Project {
   projectId: string;
   orgId: string;
@@ -271,6 +274,8 @@ export interface Project {
   createdAt: string;
   /** Org-wide member count — identical for every project under the org model. */
   memberCount?: number;
+  /** Present on the list endpoint only, not on GET /projects/{id}. */
+  bugStats?: BugStats;
   deletedAt?: string;
 }
 

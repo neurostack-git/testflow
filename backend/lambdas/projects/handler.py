@@ -7,11 +7,13 @@ is gone: visibility is now a single `orgId` comparison.
 """
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 from boto3.dynamodb.conditions import Key
 
 from tfcommon.auth import get_caller, require_developer, require_org, require_project
+from tfcommon.bugs import STATUSES
 from tfcommon.db import (
     BUG_PREFIX,
     GSI1,
@@ -82,17 +84,47 @@ def _org_projects(caller) -> list:
 
 
 def list_projects(caller) -> dict:
-    """One GSI query for the whole dashboard.
+    """One GSI query for the whole dashboard, plus bug counts per project.
 
     Member count is identical for every project under the org model, so the old
-    per-project COUNT query on a ThreadPoolExecutor collapses into one read.
+    per-project COUNT query collapses into one read. Bug counts genuinely do
+    differ per project, so those fan out in parallel — one query each, status
+    projected only.
     """
     projects = [p for p in _org_projects(caller) if not p.get("deletedAt")]
     count = len(list_members(caller.org_id))
     for project in projects:
         project["memberCount"] = count
+
+    if projects:
+        with ThreadPoolExecutor(max_workers=min(len(projects), 10)) as pool:
+            list(pool.map(_attach_bug_stats, projects))
+
     projects.sort(key=lambda p: p.get("createdAt", ""), reverse=True)
     return response(200, {"projects": projects})
+
+
+def _attach_bug_stats(project: dict) -> None:
+    """Status tally for the dashboard card. Projects only `status`, so the
+    payload stays small even on a project with hundreds of bugs."""
+    try:
+        bugs = query_all(
+            KeyConditionExpression=Key("PK").eq(project_pk(project["projectId"]))
+            & Key("SK").begins_with(BUG_PREFIX),
+            ProjectionExpression="#s",
+            ExpressionAttributeNames={"#s": "status"},
+        )
+    except Exception as err:  # noqa: BLE001 — a stats failure must not break the list
+        print(f"Bug stats failed for {project.get('projectId')}: {err}")
+        bugs = []
+
+    stats = {status: 0 for status in STATUSES}
+    for bug in bugs:
+        status = bug.get("status")
+        if status in stats:
+            stats[status] += 1
+    stats["total"] = len(bugs)
+    project["bugStats"] = stats
 
 
 def list_bin(caller) -> dict:
