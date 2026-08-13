@@ -119,8 +119,9 @@ class TestflowStack(Stack):
 
       <h1 style="font-size:22px;font-weight:800;color:#111827;margin:0 0 10px;letter-spacing:-0.4px;">You've been invited!</h1>
       <p style="font-size:15px;color:#6b7280;margin:0 0 28px;line-height:1.7;">
-        You've been added as a <strong style="color:#f97316;">Tester</strong> on TestFlow &mdash;
+        You've been added to a <strong style="color:#f97316;">TestFlow</strong> workspace &mdash;
         a collaborative platform for bug reporting, tracking, and communication.
+        Your role is shown on your profile once you sign in.
       </p>
 
       <!-- Divider -->
