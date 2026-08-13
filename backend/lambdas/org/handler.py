@@ -7,7 +7,6 @@ MEMBER# row per user, and no per-project fan-out anywhere in this file.
 import os
 
 import boto3
-from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
 from tfcommon.auth import (
@@ -24,13 +23,14 @@ from tfcommon.auth import (
 from tfcommon.db import (
     METADATA,
     PROFILE,
-    dynamodb,
     get_item,
+    marshal,
     member_sk,
     new_id,
     now_iso,
     org_pk,
     table,
+    transact,
     user_pk,
 )
 from tfcommon.http import ApiError, api_handler, json_body, not_found, required, response
@@ -97,10 +97,10 @@ def create_org(event: dict) -> dict:
     now = now_iso()
     display_name = (body.get("ownerName") or "").strip() or email.split("@")[0]
 
-    dynamodb.meta.client.transact_write_items(TransactItems=[
+    transact([
         {"Put": {
             "TableName": table.name,
-            "Item": _marshal({
+            "Item": marshal({
                 "PK": org_pk(org_id), "SK": METADATA,
                 "orgId": org_id, "name": name, "ownerSub": sub, "createdAt": now,
             }),
@@ -108,7 +108,7 @@ def create_org(event: dict) -> dict:
         }},
         {"Put": {
             "TableName": table.name,
-            "Item": _marshal({
+            "Item": marshal({
                 "PK": org_pk(org_id), "SK": member_sk(sub),
                 "sub": sub, "email": email, "name": display_name,
                 "role": ROLE_OWNER, "status": MEMBER_ACTIVE, "joinedAt": now,
@@ -116,7 +116,7 @@ def create_org(event: dict) -> dict:
         }},
         {"Put": {
             "TableName": table.name,
-            "Item": _marshal({
+            "Item": marshal({
                 "PK": user_pk(sub), "SK": PROFILE,
                 "orgId": org_id, "role": ROLE_OWNER, "email": email,
                 "name": display_name, "phone": "",
@@ -206,10 +206,10 @@ def invite_member(event: dict, caller) -> dict:
     now = now_iso()
     display_name = email.split("@")[0]
 
-    dynamodb.meta.client.transact_write_items(TransactItems=[
+    transact([
         {"Put": {
             "TableName": table.name,
-            "Item": _marshal({
+            "Item": marshal({
                 "PK": org_pk(caller.org_id), "SK": member_sk(new_sub),
                 "sub": new_sub, "email": email, "name": display_name,
                 "role": role, "status": MEMBER_PENDING,
@@ -218,7 +218,7 @@ def invite_member(event: dict, caller) -> dict:
         }},
         {"Put": {
             "TableName": table.name,
-            "Item": _marshal({
+            "Item": marshal({
                 "PK": user_pk(new_sub), "SK": PROFILE,
                 "orgId": caller.org_id, "role": role, "email": email,
                 "name": display_name, "phone": "",
@@ -301,16 +301,16 @@ def transfer_ownership(event: dict, caller) -> dict:
 
     org = org_pk(caller.org_id)
     # All five writes or none — the org is never left with zero or two owners.
-    dynamodb.meta.client.transact_write_items(TransactItems=[
+    transact([
         _set_role(org, member_sk(caller.sub), ROLE_DEVELOPER),
         _set_role(org, member_sk(to_sub), ROLE_OWNER),
         _set_profile_role(caller.sub, ROLE_DEVELOPER),
         _set_profile_role(to_sub, ROLE_OWNER),
         {"Update": {
             "TableName": table.name,
-            "Key": _marshal({"PK": org, "SK": METADATA}),
+            "Key": marshal({"PK": org, "SK": METADATA}),
             "UpdateExpression": "SET ownerSub = :s",
-            "ExpressionAttributeValues": _marshal({":s": to_sub}),
+            "ExpressionAttributeValues": marshal({":s": to_sub}),
         }},
     ])
 
@@ -318,31 +318,25 @@ def transfer_ownership(event: dict, caller) -> dict:
 
 
 # ── Transaction helpers ──────────────────────────────────────────────────────
-#  boto3's resource-level Table API has no transaction support, so these build
-#  client-level items. `_marshal` converts plain Python to the wire format.
-
-_serializer = TypeSerializer()
-
-
-def _marshal(obj: dict) -> dict:
-    return {k: _serializer.serialize(v) for k, v in obj.items()}
+#  The resource-level Table API has no transaction support, so these build
+#  client-level items via tfcommon.db.marshal().
 
 
 def _set_role(org: str, sk: str, role: str) -> dict:
     return {"Update": {
         "TableName": table.name,
-        "Key": _marshal({"PK": org, "SK": sk}),
+        "Key": marshal({"PK": org, "SK": sk}),
         "UpdateExpression": "SET #r = :r",
         "ExpressionAttributeNames": {"#r": "role"},
-        "ExpressionAttributeValues": _marshal({":r": role}),
+        "ExpressionAttributeValues": marshal({":r": role}),
     }}
 
 
 def _set_profile_role(sub: str, role: str) -> dict:
     return {"Update": {
         "TableName": table.name,
-        "Key": _marshal({"PK": user_pk(sub), "SK": PROFILE}),
+        "Key": marshal({"PK": user_pk(sub), "SK": PROFILE}),
         "UpdateExpression": "SET #r = :r",
         "ExpressionAttributeNames": {"#r": "role"},
-        "ExpressionAttributeValues": _marshal({":r": role}),
+        "ExpressionAttributeValues": marshal({":r": role}),
     }}

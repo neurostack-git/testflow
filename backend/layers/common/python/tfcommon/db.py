@@ -10,8 +10,18 @@ import uuid
 from datetime import datetime, timezone
 
 import boto3
+from boto3.dynamodb.types import TypeSerializer
+from botocore.exceptions import ClientError
 
 dynamodb = boto3.resource("dynamodb")
+
+# Standalone low-level client for TransactWriteItems.
+#
+# Do NOT use `dynamodb.meta.client` for transactions: the resource installs a
+# document transformer on its client, so pre-marshalled items get serialised a
+# SECOND time and every key arrives as an M instead of an S. Use this client
+# with `marshal()` below, which is the only correct pairing.
+ddb_client = boto3.client("dynamodb")
 
 TABLE_NAME = os.environ["TABLE_NAME"]
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
@@ -96,6 +106,31 @@ def now_iso() -> str:
 
 def new_id() -> str:
     return str(uuid.uuid4())
+
+
+_serializer = TypeSerializer()
+
+
+def marshal(obj: dict) -> dict:
+    """Plain Python -> DynamoDB wire format, for use with `ddb_client` only."""
+    return {k: _serializer.serialize(v) for k, v in obj.items()}
+
+
+def transact(items: list) -> None:
+    """All-or-nothing write. Surfaces the per-item cancellation reason, which
+    the raw exception message truncates to a useless '[ValidationError, None]'."""
+    try:
+        ddb_client.transact_write_items(TransactItems=items)
+    except ClientError as err:
+        reasons = err.response.get("CancellationReasons", [])
+        detail = "; ".join(
+            f"item[{i}] {r.get('Code')}: {r.get('Message')}"
+            for i, r in enumerate(reasons)
+            if r.get("Code") and r.get("Code") != "None"
+        )
+        if detail:
+            print(f"TransactWriteItems failed -> {detail}")
+        raise
 
 
 def get_item(pk: str, sk: str):
