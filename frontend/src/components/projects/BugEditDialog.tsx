@@ -6,11 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Image, Upload, Video, X } from "lucide-react";
-import { bugsApi, attachmentsApi, uploadToS3, uploadToS3WithProgress, type Bug, type BugStatus } from "@/lib/api";
+import { bugsApi, attachmentsApi, uploadToS3, uploadToS3WithProgress, type Bug, type BugStatus, type UpdateBugPayload } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { trimName, displayFilename } from "@/lib/filenames";
 import { ALL_STATUSES, STATUS_STYLES, transitionsFor } from "@/lib/bug-status";
-import { isDeveloper, type Role } from "@/lib/permissions";
+import { canEditBug, isDeveloper, type Role } from "@/lib/permissions";
+import { useAuth } from "@/context/auth-context";
+
+function sameKeys(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
 
 function getEditableStatuses(bug: Bug, role: Role): BugStatus[] {
   if (isDeveloper(role)) return ALL_STATUSES;
@@ -29,6 +34,11 @@ interface BugEditDialogProps {
 }
 
 export function BugEditDialog({ open, onOpenChange, bug, projectId, role, onUpdated }: BugEditDialogProps) {
+  const { user } = useAuth();
+  // Testers may retest ANY bug but may only rewrite their own (D10). When they
+  // cannot edit content, the dialog still works — as a status-only form.
+  const canEditContent = !!bug && canEditBug(role, user?.sub ?? "", bug);
+
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
   const [status, setStatus] = useState<BugStatus>("Open");
@@ -77,13 +87,29 @@ export function BugEditDialog({ open, onOpenChange, bug, projectId, role, onUpda
         uploadedVideoKeys.push(s3Key);
       }
       setVideoProgress({});
-      const updated = await bugsApi.update(projectId, bug.bugId, {
-        title: title.trim(),
-        description: desc.trim(),
-        status: status !== bug.status ? status : undefined,
-        screenshots: [...screenshots, ...uploadedKeys],
-        videos: [...videos, ...uploadedVideoKeys],
-      });
+
+      // Send ONLY what changed. The server applies ownership rules to content
+      // fields and the transition matrix to status, so blindly resending an
+      // unchanged title would make a tester's legitimate status change on
+      // someone else's bug fail the ownership check.
+      const nextScreenshots = [...screenshots, ...uploadedKeys];
+      const nextVideos = [...videos, ...uploadedVideoKeys];
+      const payload: UpdateBugPayload = {};
+
+      if (status !== bug.status) payload.status = status;
+      if (canEditContent) {
+        if (title.trim() !== bug.title) payload.title = title.trim();
+        if (desc.trim() !== (bug.description ?? "")) payload.description = desc.trim();
+        if (!sameKeys(nextScreenshots, bug.screenshots ?? [])) payload.screenshots = nextScreenshots;
+        if (!sameKeys(nextVideos, bug.videos ?? [])) payload.videos = nextVideos;
+      }
+
+      if (Object.keys(payload).length === 0) {
+        onOpenChange(false);
+        return;
+      }
+
+      const updated = await bugsApi.update(projectId, bug.bugId, payload);
       onUpdated(updated);
       onOpenChange(false);
     } catch (err: unknown) {
@@ -108,7 +134,9 @@ export function BugEditDialog({ open, onOpenChange, bug, projectId, role, onUpda
                   {title.length}/500
                 </span>
               </div>
-              <Input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus required maxLength={500} />
+              <Input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)}
+                autoFocus={canEditContent} required maxLength={500}
+                disabled={!canEditContent} className={cn(!canEditContent && "opacity-70 cursor-not-allowed")} />
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -119,7 +147,8 @@ export function BugEditDialog({ open, onOpenChange, bug, projectId, role, onUpda
               </div>
               <textarea id="edit-desc"
                 className="w-full min-h-24 rounded-lg border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-                value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={10000} />
+                value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={10000}
+                disabled={!canEditContent} />
             </div>
             <div className="space-y-2">
               <Label>Status</Label>
@@ -141,6 +170,11 @@ export function BugEditDialog({ open, onOpenChange, bug, projectId, role, onUpda
             </div>
             <div className="space-y-2">
               <Label>Screenshots</Label>
+              {!canEditContent && (
+                <p className="text-xs text-muted-foreground">
+                  You can change the status of this bug, but only its reporter can edit the details.
+                </p>
+              )}
               {screenshots.length > 0 && (
                 <div className="space-y-1.5">
                   {screenshots.map((key, i) => (

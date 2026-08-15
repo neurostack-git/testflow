@@ -164,12 +164,31 @@ def create_bug(event: dict, project_id: str, caller) -> dict:
 
 
 def update_bug(event: dict, project_id: str, bug_id: str, caller) -> dict:
-    require_project(caller, project_id)
+    project = require_project(caller, project_id)
     bug = _load_bug(project_id, bug_id)
-    require_can_edit_bug(caller, bug)   # Testers may edit only their own (D10)
 
     body = json_body(event)
     updates = {}
+
+    # Two different rules apply here, and conflating them is a bug:
+    #
+    #   status  -> governed by the transition matrix alone (LLD §8.3). A Tester
+    #              may retest ANY bug, not only ones they filed — that is the
+    #              whole role. This must match PATCH /status exactly.
+    #   content -> governed by ownership (D10). A Tester may retitle or
+    #              re-attach only on their own report.
+    new_status = None
+    if "status" in body and body.get("status"):
+        target = str(body["status"]).strip()
+        current = bug.get("status", INITIAL_STATUS)
+        if target != current:
+            require_transition(caller, current, target)
+            updates["status"] = target
+            new_status = target
+
+    CONTENT_FIELDS = ("title", "description", "screenshots", "videos", "documents")
+    if any(field in body for field in CONTENT_FIELDS):
+        require_can_edit_bug(caller, bug)
 
     if "title" in body:
         title = (body.get("title") or "").strip()
@@ -210,6 +229,9 @@ def update_bug(event: dict, project_id: str, bug_id: str, caller) -> dict:
     )
 
     bug.update(updates)
+    if new_status:
+        _fire_status_notifications(caller, project, bug, new_status)
+
     _attach_reporter_names([bug])
     return response(200, bug)
 
@@ -231,6 +253,13 @@ def update_status(event: dict, project_id: str, bug_id: str, caller) -> dict:
         ExpressionAttributeValues={":s": target, ":now": now},
     )
 
+    _fire_status_notifications(caller, project, bug, target)
+    return response(200, {"status": target, "updatedAt": now})
+
+
+def _fire_status_notifications(caller, project: dict, bug: dict, target: str) -> None:
+    """Shared by PATCH /status and the edit dialog, so a status change notifies
+    the same people regardless of which path made it."""
     if target == STATUS_FIXED:
         _notify_reporter_fixed(bug, project)
     elif target == STATUS_REOPENED:
@@ -239,11 +268,9 @@ def update_status(event: dict, project_id: str, bug_id: str, caller) -> dict:
             project,
             title=f"Reopened: {bug.get('title', '')}",
             notif_type="bug_reopened",
-            project_id=project_id,
+            project_id=project.get("projectId", ""),
             email=True,
         )
-
-    return response(200, {"status": target, "updatedAt": now})
 
 
 def delete_bug(project_id: str, bug_id: str, caller) -> dict:
