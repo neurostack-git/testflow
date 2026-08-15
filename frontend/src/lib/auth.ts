@@ -78,7 +78,13 @@ export async function completeNewPassword(newPassword: string) {
   return confirmSignIn({ challengeResponse: newPassword });
 }
 
+/** Anchor for the idle sign-out window (see components/layout/sidebar.tsx). */
+export const LAST_ACTIVITY_KEY = "tf-last-activity";
+
 export async function logoutUser() {
+  // Drop the idle anchor so the next sign-in starts a fresh window instead of
+  // inheriting a deadline that may already be in the past.
+  try { localStorage.removeItem(LAST_ACTIVITY_KEY); } catch { /* ignore */ }
   return signOut();
 }
 

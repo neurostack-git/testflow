@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { LayoutDashboard, Users, User, LogOut, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
+import { LAST_ACTIVITY_KEY } from "@/lib/auth";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { canViewTeam, type Role } from "@/lib/permissions";
 
@@ -17,8 +18,32 @@ const navFor = (role: Role) => [
   { href: "/profile", label: "Profile", icon: User },
 ];
 
-const INACTIVITY_MS = 10 * 60 * 1000;
+const INACTIVITY_MS = 48 * 60 * 60 * 1000; // 48 hours
 const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"] as const;
+
+// Last interaction is persisted so the window survives reloads and closed tabs.
+// A bare setTimeout is scoped to one page instance, so at 48h it would in
+// practice never fire — nobody keeps a tab open that long without refreshing,
+// and every reload would silently restart the countdown from zero.
+// mousemove fires continuously; only persist at most once per interval.
+const PERSIST_THROTTLE_MS = 30 * 1000;
+
+function readLastActivity(): number {
+  try {
+    const raw = Number(localStorage.getItem(LAST_ACTIVITY_KEY));
+    return Number.isFinite(raw) && raw > 0 ? raw : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeLastActivity(at: number): void {
+  try {
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(at));
+  } catch {
+    /* private mode — fall back to in-memory only */
+  }
+}
 
 interface SidebarProps {
   role: Role;
@@ -40,18 +65,45 @@ export function Sidebar({ role, userName, userEmail, open, onClose }: SidebarPro
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
+  // Idle sign-out. The deadline is anchored to a persisted timestamp rather
+  // than to when this component mounted, so closing the tab and returning two
+  // days later still signs you out.
   useEffect(() => {
-    function resetTimer() {
+    const lastPersistRef = { current: 0 };
+
+    function schedule(from: number) {
       if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => logout(), INACTIVITY_MS);
+      const remaining = from + INACTIVITY_MS - Date.now();
+      if (remaining <= 0) {
+        logout();
+        return;
+      }
+      timerRef.current = setTimeout(() => logout(), remaining);
     }
 
-    resetTimer();
-    ACTIVITY_EVENTS.forEach((e) => window.addEventListener(e, resetTimer, { passive: true }));
+    function onActivity() {
+      const now = Date.now();
+      // Throttle the write, not the timer — the deadline must always be fresh.
+      if (now - lastPersistRef.current >= PERSIST_THROTTLE_MS) {
+        lastPersistRef.current = now;
+        writeLastActivity(now);
+      }
+      schedule(now);
+    }
+
+    // Resume against the stored deadline; a first-ever load starts a new window.
+    const stored = readLastActivity();
+    if (!stored) writeLastActivity(Date.now());
+    schedule(stored || Date.now());
+
+    ACTIVITY_EVENTS.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
+    // Another tab may have refreshed the deadline, or signed out entirely.
+    window.addEventListener("focus", onActivity);
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
-      ACTIVITY_EVENTS.forEach((e) => window.removeEventListener(e, resetTimer));
+      ACTIVITY_EVENTS.forEach((e) => window.removeEventListener(e, onActivity));
+      window.removeEventListener("focus", onActivity);
     };
   }, [logout]);
 
