@@ -4,15 +4,18 @@ import React, { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { trimName } from "@/lib/filenames";
 import { type Bug } from "@/lib/api";
+import { bugMatchesDate, todayKey } from "@/lib/dates";
 
-type SummaryFilter = "unsolved" | "today" | null;
+type SummaryFilter = "unsolved" | null;
 
 interface SummaryStatsProps {
   bugs: Bug[];
   summaryFilter: SummaryFilter;
   testerFilter: string | null;
+  dateFilter: string;
   activeTab: string;
   setSummaryFilter: (f: SummaryFilter) => void;
+  setDateFilter: (key: string) => void;
   setTesterFilter: (name: string | null) => void;
   setActiveTab: (tab: string) => void;
 }
@@ -21,15 +24,20 @@ export function SummaryStats({
   bugs,
   summaryFilter,
   testerFilter,
+  dateFilter,
   activeTab,
   setSummaryFilter,
+  setDateFilter,
   setTesterFilter,
   setActiveTab,
 }: SummaryStatsProps) {
   const { unsolved, todayCount, byPerson } = useMemo(() => {
-    const todayStr = new Date().toDateString();
-    const unsolved = bugs.filter((b) => b.status === "Open" || b.status === "Fixed").length;
-    const todayCount = bugs.filter((b) => new Date(b.createdAt).toDateString() === todayStr).length;
+    const today = todayKey();
+    const unsolved = bugs.filter(
+      (b) => b.status === "Open" || b.status === "Fixed" || b.status === "Reopened"
+    ).length;
+    // Matches the date filter this card drives: reported OR updated today.
+    const todayCount = bugs.filter((b) => bugMatchesDate(b, today)).length;
     const byPerson = bugs.reduce<Record<string, number>>((acc, b) => {
       const name = b.reporterName ?? b.reportedBy;
       acc[name] = (acc[name] ?? 0) + 1;
@@ -43,8 +51,8 @@ export function SummaryStats({
   const statCards = [
     {
       label: "Total Bugs", value: bugs.length, color: "text-foreground",
-      active: !summaryFilter && !testerFilter && activeTab === "All",
-      onClick: () => { setSummaryFilter(null); setTesterFilter(null); setActiveTab("All"); },
+      active: !summaryFilter && !testerFilter && !dateFilter && activeTab === "All",
+      onClick: () => { setSummaryFilter(null); setTesterFilter(null); setDateFilter(""); setActiveTab("All"); },
     },
     {
       label: "Unsolved", value: unsolved, color: "text-primary",
@@ -52,9 +60,13 @@ export function SummaryStats({
       onClick: () => { setSummaryFilter(summaryFilter === "unsolved" ? null : "unsolved"); setTesterFilter(null); setActiveTab("All"); },
     },
     {
+      // Drives the same date filter as the toolbar, so the two never disagree.
       label: "Today", value: todayCount, color: "text-blue-600 dark:text-blue-400",
-      active: summaryFilter === "today",
-      onClick: () => { setSummaryFilter(summaryFilter === "today" ? null : "today"); setTesterFilter(null); setActiveTab("All"); },
+      active: dateFilter === todayKey(),
+      onClick: () => {
+        setDateFilter(dateFilter === todayKey() ? "" : todayKey());
+        setSummaryFilter(null); setTesterFilter(null); setActiveTab("All");
+      },
     },
   ];
 

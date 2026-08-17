@@ -3,14 +3,15 @@
 import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Search, X, Image, Eye, Pencil, Trash2 } from "lucide-react";
+import { Plus, Search, X, Image, Eye, Pencil, Trash2, Calendar } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type Bug, type BugStatus } from "@/lib/api";
 import { ALL_STATUSES } from "@/lib/bug-status";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { isDeveloper, type Role } from "@/lib/permissions";
+import { bugMatchesDate, formatDateKey, todayKey } from "@/lib/dates";
 
-type SummaryFilter = "unsolved" | "today" | null;
+type SummaryFilter = "unsolved" | null;
 
 const TAB_KEYS = ["All", "Open", "Fixed", "Reopened", "Closed", "Invalid"] as const;
 
@@ -21,6 +22,9 @@ interface BugTableProps {
   activeTab: string;
   summaryFilter: SummaryFilter;
   testerFilter: string | null;
+  /** "YYYY-MM-DD", or "" for no date filter (the default). */
+  dateFilter: string;
+  setDateFilter: (key: string) => void;
   setActiveTab: (tab: string) => void;
   setSummaryFilter: (f: SummaryFilter) => void;
   setTesterFilter: (name: string | null) => void;
@@ -38,6 +42,8 @@ export function BugTable({
   activeTab,
   summaryFilter,
   testerFilter,
+  dateFilter,
+  setDateFilter,
   setActiveTab,
   setSummaryFilter,
   setTesterFilter,
@@ -60,23 +66,26 @@ export function BugTable({
   }, [bugs]);
 
   const filteredBugs = useMemo(() => {
-    const todayStr = new Date().toDateString();
     const tabFiltered = activeTab === "All" ? bugs : bugs.filter((b) => b.status === activeTab);
     // "Unsolved" = anything still needing work: filed, awaiting retest, or failed retest.
+    // "Today" is no longer here — it is the date filter below, so there is one
+    // source of truth for day-based filtering.
     const summaryFiltered = summaryFilter === "unsolved"
       ? tabFiltered.filter((b) => b.status === "Open" || b.status === "Fixed" || b.status === "Reopened")
-      : summaryFilter === "today"
-      ? tabFiltered.filter((b) => new Date(b.createdAt).toDateString() === todayStr)
       : tabFiltered;
     const testerFiltered = testerFilter
       ? summaryFiltered.filter((b) => (b.reporterName ?? b.reportedBy) === testerFilter)
       : summaryFiltered;
+    // Reported OR updated on the chosen day (see lib/dates.ts).
+    const dateFiltered = dateFilter
+      ? testerFiltered.filter((b) => bugMatchesDate(b, dateFilter))
+      : testerFiltered;
     const q = bugSearch.trim().toLowerCase();
     return q
-      ? testerFiltered.filter((b) =>
+      ? dateFiltered.filter((b) =>
           b.title.toLowerCase().includes(q) || b.description.toLowerCase().includes(q))
-      : testerFiltered;
-  }, [bugs, activeTab, summaryFilter, testerFilter, bugSearch]);
+      : dateFiltered;
+  }, [bugs, activeTab, summaryFilter, testerFilter, dateFilter, bugSearch]);
 
   const searchQuery = bugSearch.trim().toLowerCase();
 
@@ -120,26 +129,84 @@ export function BugTable({
         </Button>
       </div>
 
-      <div className="px-3 py-2 border-b border-border">
-        <div className="relative">
+      <div className="px-3 py-2 border-b border-border flex flex-col sm:flex-row sm:items-center gap-2">
+        <div className="relative flex-1 min-w-0">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
           <input
             type="text"
             placeholder="Search by title or description…"
             value={bugSearch}
             onChange={(e) => setBugSearch(e.target.value)}
-            className="w-full h-8 pl-8 pr-3 text-sm bg-muted/40 border border-border rounded-md placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-colors"
+            className="w-full h-8 pl-8 pr-8 text-sm bg-muted/40 border border-border rounded-md placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-colors"
           />
           {bugSearch && (
             <button
               onClick={() => setBugSearch("")}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear search"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
+
+        {/* Date filter. No selection = all bugs, which is the default. */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className={cn(
+            "relative inline-flex items-center h-8 rounded-md border transition-colors",
+            dateFilter ? "border-primary/50 bg-primary/5" : "border-border bg-muted/40"
+          )}>
+            <Calendar className={cn(
+              "absolute left-2.5 w-3.5 h-3.5 pointer-events-none",
+              dateFilter ? "text-primary" : "text-muted-foreground"
+            )} />
+            <input
+              type="date"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              max={todayKey()}
+              aria-label="Filter by date reported or updated"
+              className={cn(
+                "h-8 pl-8 pr-2 text-sm bg-transparent rounded-md focus:outline-none focus:ring-2 focus:ring-primary/30",
+                dateFilter ? "text-foreground font-medium" : "text-muted-foreground"
+              )}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setDateFilter(dateFilter === todayKey() ? "" : todayKey())}
+            className={cn(
+              "h-8 px-2.5 rounded-md text-xs font-medium border transition-colors whitespace-nowrap",
+              dateFilter === todayKey()
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+            )}
+          >
+            Today
+          </button>
+
+          {dateFilter && (
+            <button
+              type="button"
+              onClick={() => setDateFilter("")}
+              className="h-8 px-2.5 rounded-md text-xs font-medium border border-border text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors inline-flex items-center gap-1 whitespace-nowrap"
+              title="Show all bugs"
+            >
+              <X className="w-3 h-3" />
+              Clear
+            </button>
+          )}
+        </div>
       </div>
+
+      {dateFilter && (
+        <div className="px-3 py-1.5 border-b border-border bg-primary/5 text-xs text-muted-foreground">
+          Showing bugs reported or updated on{" "}
+          <span className="font-semibold text-foreground">{formatDateKey(dateFilter)}</span>
+          {" — "}{filteredBugs.length} of {bugs.length}
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <Table>

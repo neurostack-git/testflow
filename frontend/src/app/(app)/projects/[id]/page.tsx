@@ -69,7 +69,9 @@ export default function ProjectDetailPage() {
 
   // Status tab + summary/tester filters
   const [activeTab, setActiveTab] = useState("All");
-  const [summaryFilter, setSummaryFilter] = useState<"unsolved" | "today" | null>(null);
+  const [summaryFilter, setSummaryFilter] = useState<"unsolved" | null>(null);
+  // "" = all bugs, the default. Otherwise a local "YYYY-MM-DD" day.
+  const [dateFilter, setDateFilter] = useState("");
   const [testerFilter, setTesterFilter] = useState<string | null>(null);
 
   // Chat drawer — lazy mount: only add to DOM after first open to avoid overflow
@@ -190,8 +192,10 @@ export default function ProjectDetailPage() {
         bugs={bugs}
         summaryFilter={summaryFilter}
         testerFilter={testerFilter}
+        dateFilter={dateFilter}
         activeTab={activeTab}
         setSummaryFilter={setSummaryFilter}
+        setDateFilter={setDateFilter}
         setTesterFilter={setTesterFilter}
         setActiveTab={setActiveTab}
       />
@@ -206,6 +210,8 @@ export default function ProjectDetailPage() {
         activeTab={activeTab}
         summaryFilter={summaryFilter}
         testerFilter={testerFilter}
+        dateFilter={dateFilter}
+        setDateFilter={setDateFilter}
         setActiveTab={setActiveTab}
         setSummaryFilter={setSummaryFilter}
         setTesterFilter={setTesterFilter}
