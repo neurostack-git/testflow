@@ -5,10 +5,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Image, Upload, Video, X } from "lucide-react";
+import { Upload, Video } from "lucide-react";
 import { bugsApi, attachmentsApi, uploadToS3, uploadToS3WithProgress, type Bug } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { trimName } from "@/lib/filenames";
+import { AttachmentPreview } from "@/components/projects/AttachmentPreview";
+import { useObjectUrls, type PreviewItem } from "@/hooks/useAttachmentPreviews";
+import { usePasteImages } from "@/hooks/usePasteImages";
 
 // Must match MAX_SCREENSHOTS / MAX_VIDEOS in backend/lambdas/bugs/handler.py —
 // the server rejects anything above these.
@@ -31,6 +33,21 @@ export function BugCreateDialog({ open, onOpenChange, projectId, reporterName, o
   const [videoProgress, setVideoProgress] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  const fileUrls = useObjectUrls(files);
+  const videoUrls = useObjectUrls(videoFiles);
+
+  // Ctrl/Cmd+V anywhere in the dialog attaches a copied screenshot.
+  usePasteImages(open, (pasted) =>
+    setFiles((prev) => [...prev, ...pasted].slice(0, MAX_SCREENSHOTS))
+  );
+
+  const screenshotItems: PreviewItem[] = files.map((file, i) => ({
+    id: `s${i}`, url: fileUrls[i] ?? "", name: file.name, kind: "image", fileIndex: i,
+  }));
+  const videoItems: PreviewItem[] = videoFiles.map((file, i) => ({
+    id: `create_${i}`, url: videoUrls[i] ?? "", name: file.name, kind: "video", fileIndex: i,
+  }));
 
   function reset() {
     setTitle("");
@@ -114,7 +131,7 @@ export function BugCreateDialog({ open, onOpenChange, projectId, reporterName, o
             <Label>Screenshots <span className="text-muted-foreground font-normal">(max {MAX_SCREENSHOTS}, images only)</span></Label>
             <label className="flex items-center justify-center gap-2 w-full h-20 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors text-sm text-muted-foreground">
               <Upload className="w-4 h-4" />
-              Click to upload screenshots
+              Click to upload, or paste with Ctrl+V
               <input type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
                 onChange={(e) => {
                   // Read the FileList BEFORE clearing the input. React runs the
@@ -126,19 +143,13 @@ export function BugCreateDialog({ open, onOpenChange, projectId, reporterName, o
                 }} />
             </label>
             {files.length > 0 && (
-              <div className="space-y-1.5 mt-2">
-                {files.map((file, i) => (
-                  <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-muted/40 text-sm overflow-hidden">
-                    <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-                      <Image className="w-4 h-4 text-primary shrink-0" />
-                      <span className="truncate">{trimName(file.name)}</span>
-                    </div>
-                    <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
-                      className="text-muted-foreground hover:text-destructive shrink-0">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
+              <div className="mt-2">
+                <AttachmentPreview
+                  items={screenshotItems}
+                  onRemove={(item) =>
+                    setFiles((prev) => prev.filter((_, j) => j !== item.fileIndex))
+                  }
+                />
               </div>
             )}
           </div>
@@ -155,34 +166,14 @@ export function BugCreateDialog({ open, onOpenChange, projectId, reporterName, o
                 }} />
             </label>
             {videoFiles.length > 0 && (
-              <div className="space-y-1.5 mt-2">
-                {videoFiles.map((file, i) => {
-                  const pct = videoProgress[`create_${i}`];
-                  const uploading = pct !== undefined;
-                  return (
-                    <div key={i} className="px-3 py-2 rounded-lg bg-muted/40 text-sm space-y-1.5 overflow-hidden">
-                      <div className="flex items-center justify-between gap-2 overflow-hidden">
-                        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-                          <Video className="w-4 h-4 text-primary shrink-0" />
-                          <span className="truncate">{trimName(file.name)}</span>
-                        </div>
-                        {uploading ? (
-                          <span className="text-xs font-semibold text-primary shrink-0">{pct}%</span>
-                        ) : (
-                          <button type="button" onClick={() => setVideoFiles((prev) => prev.filter((_, j) => j !== i))}
-                            className="text-muted-foreground hover:text-destructive shrink-0">
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                      {uploading && (
-                        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div className="h-full bg-primary rounded-full transition-all duration-150 ease-out" style={{ width: `${pct}%` }} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+              <div className="mt-2">
+                <AttachmentPreview
+                  items={videoItems}
+                  progress={videoProgress}
+                  onRemove={(item) =>
+                    setVideoFiles((prev) => prev.filter((_, j) => j !== item.fileIndex))
+                  }
+                />
               </div>
             )}
           </div>
